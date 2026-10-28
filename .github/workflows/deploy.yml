@@ -52,12 +52,27 @@ jobs:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
+      # Antes da configuração inicial (DEPLOY.md) não há segredo nem VM pronta: avisa e pula.
+      - name: Deploy configurado?
+        id: cfg
+        env:
+          BOT_DEPLOY_KEY: ${{ secrets.BOT_DEPLOY_KEY }}
+        run: |
+          if [ -z "$BOT_DEPLOY_KEY" ]; then
+            echo "::notice::Segredo BOT_DEPLOY_KEY ainda não cadastrado: deploy pulado (ver DEPLOY.md)."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
       # histórico completo: o repo bare do servidor não aceita push vindo de clone raso
       - uses: actions/checkout@v4
+        if: steps.cfg.outputs.ok == 'true'
         with:
           fetch-depth: 0
 
       - name: Chave de deploy
+        if: steps.cfg.outputs.ok == 'true'
         env:
           BOT_DEPLOY_KEY: ${{ secrets.BOT_DEPLOY_KEY }}
           BOT_KNOWN_HOSTS: ${{ secrets.BOT_KNOWN_HOSTS }}
@@ -68,6 +83,7 @@ jobs:
           chmod 600 ~/.ssh/deploy ~/.ssh/known_hosts
 
       - name: Publicar na VM
+        if: steps.cfg.outputs.ok == 'true'
         env:
           GIT_SSH_COMMAND: ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
         run: |
@@ -82,6 +98,7 @@ jobs:
           fi
 
       - name: Saúde
+        if: steps.cfg.outputs.ok == 'true'
         run: |
           for tentativa in 1 2 3 4 5 6 7 8; do
             if curl -fsS -m 10 "$SITE_URL/saude" | grep -q '"ok":true'; then
