@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Publica o Bot Financeiro na VM Hetzner do começo ao fim. Roda no SEU computador (Git Bash), na
-# raiz deste repositório, com a chave de root da VM em ~/.ssh/saplink_hetzner:
+# raiz deste repositório, com uma chave que entre na VM como root em ~/.ssh (o script acha qual):
 #
 #   bash scripts/publicar-na-vm.sh voce@exemplo.com
 #
@@ -18,7 +18,8 @@
 set -euo pipefail
 
 VM=77.42.120.142
-CHAVE_ROOT="$HOME/.ssh/saplink_hetzner"
+# chave de root da VM: a de CHAVE_ROOT, se você passar; senão o script procura em ~/.ssh
+CHAVE_ROOT="${CHAVE_ROOT:-}"
 CHAVE_CI="$HOME/.ssh/bot_ci"
 CHAVE_DEPLOY="$HOME/.ssh/bot_deploy"
 COPIA_CIFRA="$HOME/.ssh/bot-financeiro.encryption-key"
@@ -36,15 +37,43 @@ passo() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 ok() { printf '   \033[32mok\033[0m %s\n' "$*"; }
 aviso() { printf '   \033[33m!!\033[0m %s\n' "$*"; }
 falha() { printf '\n\033[31mPAROU:\033[0m %s\n' "$*" >&2; exit 1; }
-root() { ssh -i "$CHAVE_ROOT" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 "root@$VM" "$@"; }
+SSH_ID=()
+root() { ssh "${SSH_ID[@]}" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 "root@$VM" "$@"; }
+
+# Acha a chave que entra na VM como root: a informada, a saplink_hetzner, qualquer chave privada
+# de ~/.ssh e, por último, o que o ssh usaria sozinho (~/.ssh/config, agente).
+achar_chave_root() {
+  local candidatas=() k
+  if [ -n "$CHAVE_ROOT" ]; then
+    candidatas=("$CHAVE_ROOT")
+  else
+    candidatas=("$HOME/.ssh/saplink_hetzner")
+    for k in "$HOME"/.ssh/*; do
+      [ -f "$k" ] || continue
+      case "$k" in *.pub | */known_hosts* | */config | */authorized_keys* | */bot_ci | */bot_deploy | *.encryption-key*) continue ;; esac
+      head -c 40 "$k" 2>/dev/null | grep -q -- '-----BEGIN' && candidatas+=("$k")
+    done
+  fi
+  for k in "${candidatas[@]}"; do
+    [ -f "$k" ] || continue
+    if ssh -i "$k" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "root@$VM" true 2>/dev/null; then
+      SSH_ID=(-i "$k" -o IdentitiesOnly=yes); CHAVE_ROOT="$k"; return 0
+    fi
+  done
+  # chave com senha ou configurada no ~/.ssh/config: deixa o ssh escolher (pode pedir a senha da chave)
+  if [ -z "${CHAVE_ROOT:-}" ] && ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "root@$VM" true; then
+    SSH_ID=(); CHAVE_ROOT="(a padrão do ssh)"; return 0
+  fi
+  return 1
+}
 
 # ------------------------------------------------------------------ conferências
 passo "0. Conferências"
 [ -f deploy/setup-vm.sh ] && [ -f docker-compose.yml ] || falha "rode na raiz do repositório bot-financeiro (cd /c/git/bot-financeiro)"
-[ -f "$CHAVE_ROOT" ] || falha "não achei a chave de root da VM em $CHAVE_ROOT"
 command -v ssh-keygen >/dev/null || falha "ssh-keygen não encontrado (rode no Git Bash)"
-root true || falha "não consegui entrar na VM como root com $CHAVE_ROOT"
-ok "acesso root à VM"
+achar_chave_root || falha "nenhuma chave de ~/.ssh entra na VM como root. Veja quais você tem com: ls ~/.ssh
+   Se a chave estiver em outro lugar, rode assim: CHAVE_ROOT=/caminho/da/chave bash scripts/publicar-na-vm.sh $EMAIL"
+ok "acesso root à VM com $CHAVE_ROOT"
 git fetch -q origin main
 [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] \
   || falha "o seu clone não está igual à origin/main. Rode: git checkout main && git pull"
@@ -82,7 +111,7 @@ log="$(mktemp)"
 GIT_SSH_COMMAND="ssh -i $CHAVE_DEPLOY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
   git push --force "botdeploy@$VM:bot-financeiro.git" "HEAD:refs/heads/main" 2>&1 | tee "$log" | sed 's/^/   /' || true
 if grep -q "deploy falhou" "$log"; then
-  falha "a VM recebeu o push, mas o deploy falhou (veja acima). Logs: ssh -i $CHAVE_ROOT root@$VM 'docker logs --tail 100 bot-app'"
+  falha "a VM recebeu o push, mas o deploy falhou (veja acima). Logs: ssh root@$VM 'docker logs --tail 100 bot-app'"
 fi
 if grep -Eq "deploy de main -> bot-financeiro OK" "$log"; then
   ok "containers no ar"
@@ -141,7 +170,7 @@ for _ in $(seq 1 24); do
 done
 case "$saude" in
   *'"ok":true'*) ok "respondendo: $saude" ;;
-  *) falha "https://$DOMINIO/saude não respondeu em 2 minutos. Veja: ssh -i $CHAVE_ROOT root@$VM 'docker logs --tail 50 saplink-caddy; docker logs --tail 50 bot-app'" ;;
+  *) falha "https://$DOMINIO/saude não respondeu em 2 minutos. Veja: ssh root@$VM 'docker logs --tail 50 saplink-caddy; docker logs --tail 50 bot-app'" ;;
 esac
 
 # ------------------------------------------------------------------ 7. usuário do painel
