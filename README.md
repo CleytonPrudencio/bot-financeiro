@@ -16,7 +16,7 @@ painel web para cadastrar contas e estratégias, ver sinais e ordens, e uma **pa
 | Testnet | Binance, Bybit e OKX têm; Mercado Bitcoin e Foxbit não |
 | B3 (ações, futuros) | **não suportado ainda**: precisa de uma ponte com o MetaTrader 5 (ver [Próximos passos](#próximos-passos)) |
 | Endereço | https://bot.77.42.120.142.sslip.io (VM Hetzner, atrás do Caddy compartilhado) |
-| Deploy | push na `main` → GitHub Actions testa → `git push` para a VM → container novo ([DEPLOY.md](DEPLOY.md)) |
+| Deploy | primeira vez: `bash scripts/publicar-na-vm.sh voce@exemplo.com`; depois, push na `main` → GitHub Actions testa → `git push` para a VM ([DEPLOY.md](DEPLOY.md)) |
 
 ## Como funciona
 

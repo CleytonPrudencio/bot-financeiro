@@ -20,6 +20,31 @@ deploy automático pelo GitHub Actions, banco em rede interna, teto de recursos 
 
 Os comandos abaixo rodam no Git Bash do seu computador, na raiz deste repositório.
 
+## Jeito automático (recomendado)
+
+Um script faz toda a configuração inicial e o primeiro deploy, e pode rodar de novo sem estragar
+nada (cada etapa confere se já foi feita):
+
+```bash
+bash scripts/publicar-na-vm.sh voce@exemplo.com
+```
+
+Ele cria as chaves de deploy, prepara a VM, publica, guarda uma cópia do `BOT_ENCRYPTION_KEY` em
+`~/.ssh/bot-financeiro.encryption-key`, acrescenta o bloco no Caddy (backup, validação, e restaura o
+arquivo se reprovar), espera o `/saude`, cria o seu usuário do painel (a senha aparece uma vez) e,
+se o [GitHub CLI](https://cli.github.com) estiver instalado e logado, cadastra os segredos do
+Actions para os próximos pushes publicarem sozinhos. Sem o GitHub CLI:
+
+```bash
+winget install --id GitHub.cli
+```
+
+```bash
+gh auth login
+```
+
+e rode o script de novo. As seções abaixo são o mesmo passo a passo, à mão.
+
 ## Configuração inicial (uma vez)
 
 ### 1. Chaves de deploy
