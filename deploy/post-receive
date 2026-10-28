@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Hook do repo bare /home/botdeploy/bot-financeiro.git (hooks/post-receive, dono botdeploy, 755).
+# Cada branch recebido vai para o script de deploy, que roda como root pela única regra de sudo do botdeploy.
+while read -r _old _new ref; do
+  branch="${ref#refs/heads/}"
+  echo ">> bot-financeiro: deploy de $branch"
+  if ! sudo -n /opt/bot-financeiro-deploy/deploy.sh "$branch"; then
+    echo "deploy falhou ($branch)"
+  fi
+done

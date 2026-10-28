@@ -1,0 +1,8 @@
+
+# ── Bot Financeiro ──
+# Cópia versionada do bloco no Caddyfile compartilhado (/opt/saplink/deploy/Caddyfile).
+# Acrescente com `cat >>`, nunca com editor ou sed -i (ver DEPLOY.md).
+bot.77.42.120.142.sslip.io {
+	encode gzip
+	reverse_proxy bot-app:3000
+}

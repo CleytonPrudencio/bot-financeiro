@@ -1,0 +1,98 @@
+name: deploy
+
+# Todo push na main é testado e, se passar, publicado na VM Hetzner (atrás do Caddy compartilhado).
+# Pull request só roda os testes.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DEPLOY_REMOTE: botdeploy@77.42.120.142:bot-financeiro.git
+  SITE_URL: https://bot.77.42.120.142.sslip.io
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: teste
+          POSTGRES_DB: bot_teste
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Testes (unidade e integração com Postgres)
+        run: npm test
+        env:
+          TEST_DATABASE_URL: postgres://postgres:teste@localhost:5432/bot_teste
+      - run: npm run build
+      - name: Imagem Docker monta
+        run: docker build -q -t bot-financeiro:ci .
+
+  deploy:
+    needs: testes
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      # histórico completo: o repo bare do servidor não aceita push vindo de clone raso
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Chave de deploy
+        env:
+          BOT_DEPLOY_KEY: ${{ secrets.BOT_DEPLOY_KEY }}
+          BOT_KNOWN_HOSTS: ${{ secrets.BOT_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$BOT_DEPLOY_KEY" > ~/.ssh/deploy
+          printf '%s\n' "$BOT_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy ~/.ssh/known_hosts
+
+      - name: Publicar na VM
+        env:
+          GIT_SSH_COMMAND: ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+        run: |
+          git push --force "$DEPLOY_REMOTE" "HEAD:refs/heads/main" 2>&1 | tee push.log
+          if grep -q "deploy falhou" push.log; then
+            echo "::error::O servidor recebeu o push, mas o deploy falhou. Veja o log acima."
+            exit 1
+          fi
+          if ! grep -Eq "deploy de main -> bot-financeiro OK|Everything up-to-date" push.log; then
+            echo "::error::O servidor não confirmou o deploy."
+            exit 1
+          fi
+
+      - name: Saúde
+        run: |
+          for tentativa in 1 2 3 4 5 6 7 8; do
+            if curl -fsS -m 10 "$SITE_URL/saude" | grep -q '"ok":true'; then
+              echo "$SITE_URL/saude ok"; exit 0
+            fi
+            echo "tentativa $tentativa: ainda não"
+            sleep 8
+          done
+          echo "::error::$SITE_URL/saude não respondeu ok depois do deploy."
+          exit 1
+
+      - name: Apagar chave
+        if: always()
+        run: rm -f ~/.ssh/deploy

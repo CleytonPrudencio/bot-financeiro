@@ -1,0 +1,75 @@
+:root {
+  --fundo: #f6f7f9;
+  --cartao: #ffffff;
+  --texto: #1c2430;
+  --suave: #5b6676;
+  --borda: #dde2e8;
+  --primaria: #1f5fbf;
+  --perigo: #c0362c;
+  --ok: #1d7f4e;
+  --alerta: #b26b00;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fundo: #12161c;
+    --cartao: #1a2029;
+    --texto: #e6e9ee;
+    --suave: #9aa5b4;
+    --borda: #2c3542;
+    --primaria: #5b9bff;
+    --perigo: #ff6b5e;
+    --ok: #4cc38a;
+    --alerta: #ffb44d;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--fundo); color: var(--texto); }
+header { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; padding: 12px 20px; background: var(--cartao); border-bottom: 1px solid var(--borda); }
+header nav { display: flex; flex-wrap: wrap; gap: 4px 14px; flex: 1; }
+header a { color: var(--suave); text-decoration: none; }
+header a.ativo { color: var(--primaria); font-weight: 600; }
+.marca { font-size: 16px; }
+#quem { color: var(--suave); font-size: 13px; }
+main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
+h1 { font-size: 22px; margin: 4px 0 16px; }
+h2 { font-size: 17px; margin: 24px 0 10px; }
+.cartao { background: var(--cartao); border: 1px solid var(--borda); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.numero { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rotulo { color: var(--suave); font-size: 13px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--borda); vertical-align: top; }
+th { color: var(--suave); font-weight: 500; font-size: 13px; }
+.rolagem { overflow-x: auto; }
+button { font: inherit; padding: 7px 14px; border-radius: 7px; border: 1px solid var(--primaria); background: var(--primaria); color: #fff; cursor: pointer; }
+button.secundario { background: transparent; color: var(--primaria); }
+button.perigo { background: var(--perigo); border-color: var(--perigo); }
+button.pequeno { padding: 3px 9px; font-size: 13px; }
+button:disabled { opacity: .5; cursor: default; }
+form { display: grid; gap: 12px; }
+.campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+label { display: grid; gap: 4px; font-size: 13px; color: var(--suave); }
+label.marcar { display: flex; align-items: center; gap: 8px; color: var(--texto); }
+input, select, textarea { font: inherit; padding: 7px 9px; border-radius: 7px; border: 1px solid var(--borda); background: var(--fundo); color: var(--texto); width: 100%; }
+input[type="checkbox"] { width: auto; }
+.acoes { display: flex; flex-wrap: wrap; gap: 8px; }
+.selo { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 12px; border: 1px solid currentColor; }
+.ok { color: var(--ok); }
+.perigo-txt { color: var(--perigo); }
+.alerta-txt { color: var(--alerta); }
+.suave { color: var(--suave); }
+code, .mono { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 13px; word-break: break-all; }
+pre { white-space: pre-wrap; word-break: break-all; background: var(--fundo); border: 1px solid var(--borda); border-radius: 7px; padding: 10px; margin: 6px 0; }
+#faixa { padding: 10px 20px; text-align: center; font-weight: 600; color: #fff; background: var(--perigo); }
+#faixa.simulacao { background: var(--alerta); color: #111; }
+#aviso { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px); background: var(--texto); color: var(--fundo); padding: 10px 16px; border-radius: 8px; }
+#aviso.erro { background: var(--perigo); color: #fff; }
+.parada { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.login { max-width: 360px; margin: 10vh auto; }
+@media (max-width: 720px) {
+  header nav { order: 3; flex-basis: 100%; }
+  header { padding: 10px 16px; }
+}
+dialog { border: 1px solid var(--borda); border-radius: 10px; background: var(--cartao); color: var(--texto); max-width: min(680px, calc(100% - 32px)); width: 100%; }
+dialog::backdrop { background: rgba(0, 0, 0, .45); }

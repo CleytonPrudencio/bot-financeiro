@@ -1,0 +1,100 @@
+# Bot Financeiro na VM Hetzner (/opt/bot-financeiro). Segue o padrão da VM para sistema novo:
+# nome de projeto explícito, container_name com prefixo, restart unless-stopped, teto de recursos,
+# banco numa rede interna própria e só o app na rede do Caddy (saplink_default). Nenhuma porta no host.
+#
+# Deploy:  docker compose --env-file .env up -d --build
+name: bot-financeiro
+
+services:
+  bot-app:
+    build:
+      context: .
+    container_name: bot-app
+    restart: unless-stopped
+    depends_on:
+      bot-db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: "postgresql://bot:${BOT_DB_PASSWORD:?defina BOT_DB_PASSWORD no .env}@bot-db:5432/bot"
+      BOT_SESSION_SECRET: "${BOT_SESSION_SECRET:?defina BOT_SESSION_SECRET no .env}"
+      BOT_ENCRYPTION_KEY: "${BOT_ENCRYPTION_KEY:?defina BOT_ENCRYPTION_KEY no .env}"
+      # primeira chave do dinheiro real: fica "false" até você decidir operar de verdade
+      BOT_LIVE_ENABLED: "${BOT_LIVE_ENABLED:-false}"
+      BOT_PUBLIC_URL: "${BOT_PUBLIC_URL:-https://bot.77.42.120.142.sslip.io}"
+      BOT_TRUST_PROXY: "1"
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 256
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # interna: fala com o banco · proxy: recebe o Caddy e sai para a internet (exchanges)
+    networks: [interna, proxy]
+
+  bot-db:
+    image: postgres:16-alpine
+    container_name: bot-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bot
+      POSTGRES_USER: bot
+      POSTGRES_PASSWORD: "${BOT_DB_PASSWORD:?defina BOT_DB_PASSWORD no .env}"
+    volumes:
+      - bot_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bot -d bot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 128
+    security_opt: ["no-new-privileges:true"]
+    networks: [interna]
+
+  # Cópia diária do banco, guardando as 7 mais recentes. Restaurar:
+  #   docker exec -i bot-db pg_restore -U bot -d bot --clean < arquivo.dump
+  bot-backup:
+    image: postgres:16-alpine
+    container_name: bot-backup
+    restart: unless-stopped
+    depends_on:
+      bot-db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: "${BOT_DB_PASSWORD:?defina BOT_DB_PASSWORD no .env}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        umask 077
+        while true; do
+          arquivo=/backups/bot-$$(date +%F).dump
+          if pg_dump -h bot-db -U bot -Fc -f "$$arquivo.tmp" bot; then
+            mv "$$arquivo.tmp" "$$arquivo"
+            ls -1t /backups/bot-*.dump | tail -n +8 | xargs -r rm -f
+            echo "backup ok: $$arquivo"
+          else
+            rm -f "$$arquivo.tmp"
+            echo "backup falhou"
+          fi
+          sleep 86400
+        done
+    volumes:
+      - bot_backups:/backups
+    mem_limit: 96m
+    cpus: 0.25
+    pids_limit: 64
+    security_opt: ["no-new-privileges:true"]
+    networks: [interna]
+
+volumes:
+  bot_db:
+  bot_backups:
+
+networks:
+  interna:
+    internal: true
+  proxy:
+    external: true
+    name: saplink_default
