@@ -101,14 +101,15 @@ passo "2. Preparar a VM (botdeploy, repo bare, hook, sudo)"
 nomes=()
 for p in "${PUBS[@]}"; do nomes+=("/tmp/bot-setup/$(basename "$p")"); done
 tar czf - deploy -C "$HOME/.ssh" "${PUBS[@]##*/}" \
-  | root "rm -rf /tmp/bot-setup && mkdir /tmp/bot-setup && tar xzf - -C /tmp/bot-setup && bash /tmp/bot-setup/deploy/setup-vm.sh ${nomes[*]}; s=\$?; rm -rf /tmp/bot-setup; exit \$s" \
+  | root "rm -rf /tmp/bot-setup && mkdir /tmp/bot-setup && tar xzmf - -C /tmp/bot-setup && bash /tmp/bot-setup/deploy/setup-vm.sh ${nomes[*]}; s=\$?; rm -rf /tmp/bot-setup; exit \$s" \
   | sed 's/^/   /'
 ok "VM preparada"
 
 # ------------------------------------------------------------------ 3. deploy
 passo "3. Deploy (git push para a VM)"
 log="$(mktemp)"
-GIT_SSH_COMMAND="ssh -i $CHAVE_DEPLOY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+# o git passa isto por um shell: as aspas protegem caminhos com espaço (ex.: /c/Users/Cleyton Sales)
+GIT_SSH_COMMAND="ssh -i \"$CHAVE_DEPLOY\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
   git push --force "botdeploy@$VM:bot-financeiro.git" "HEAD:refs/heads/main" 2>&1 | tee "$log" | sed 's/^/   /' || true
 if grep -q "deploy falhou" "$log"; then
   falha "a VM recebeu o push, mas o deploy falhou (veja acima). Logs: ssh root@$VM 'docker logs --tail 100 bot-app'"

@@ -66,7 +66,7 @@ Manda a pasta `deploy/` e as duas chaves **públicas** pela conexão SSH e roda 
 root (cria o `botdeploy`, o repo bare, o hook, o script de deploy e a regra de sudo):
 
 ```bash
-tar czf - deploy -C ~/.ssh bot_ci.pub bot_deploy.pub | ssh -i ~/.ssh/saplink_hetzner root@77.42.120.142 'rm -rf /tmp/bot-setup && mkdir /tmp/bot-setup && tar xzf - -C /tmp/bot-setup && bash /tmp/bot-setup/deploy/setup-vm.sh /tmp/bot-setup/bot_ci.pub /tmp/bot-setup/bot_deploy.pub; rm -rf /tmp/bot-setup'
+tar czf - deploy -C ~/.ssh bot_ci.pub bot_deploy.pub | ssh -i ~/.ssh/saplink_hetzner root@77.42.120.142 'rm -rf /tmp/bot-setup && mkdir /tmp/bot-setup && tar xzmf - -C /tmp/bot-setup && bash /tmp/bot-setup/deploy/setup-vm.sh /tmp/bot-setup/bot_ci.pub /tmp/bot-setup/bot_deploy.pub; rm -rf /tmp/bot-setup'
 ```
 
 Pode rodar de novo sem estragar nada (é assim que se leva uma mudança do `server-deploy.sh` ou do
