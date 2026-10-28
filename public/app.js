@@ -525,8 +525,17 @@ async function paginaAuditoria() {
 
 // ------------------------------------------------------------------ rotas
 
+async function paginaEscritorio() {
+  const { montarEscritorio } = await import('./escritorio/escritorio.js');
+  const caixa = h('div');
+  const escritorio = montarEscritorio(caixa);
+  limparPagina = () => escritorio.parar();
+  return [h('h1', {}, 'Escritório'), caixa];
+}
+
 const paginas = {
   '#/painel': paginaPainel,
+  '#/escritorio': paginaEscritorio,
   '#/estrategias': paginaEstrategias,
   '#/contas': paginaContas,
   '#/sinais': paginaSinais,
@@ -534,7 +543,12 @@ const paginas = {
   '#/auditoria': paginaAuditoria,
 };
 
+// a página do escritório anima um canvas: precisa parar o laço ao trocar de página
+let limparPagina = null;
+
 async function rota() {
+  limparPagina?.();
+  limparPagina = null;
   const chave = paginas[location.hash] ? location.hash : '#/painel';
   for (const a of document.querySelectorAll('header a')) a.classList.toggle('ativo', a.getAttribute('href') === chave);
   try {

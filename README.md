@@ -86,6 +86,27 @@ Ficam no banco cifradas com AES-256-GCM usando `BOT_ENCRYPTION_KEY` (que não fi
 voltam para o painel. Na exchange, crie a chave **sem permissão de saque** e, se der, restrita ao IP
 `77.42.120.142`.
 
+## Escritório virtual
+
+Página **Escritório** do painel: um escritório animado (Canvas, sem biblioteca) onde cada robô
+analista cuida de um mercado na própria mesa (Ações/PETR4, Bitcoin, Ethereum, Dólar), com o gráfico
+ao vivo no monitor. Quando um analista vê um sinal (cruzamento das médias 9 e 26, stop ou alvo),
+leva a proposta até o **robô chefe**, que confere de novo (tendência longa, IFR, volatilidade,
+exposição total, sequência de perdas). Os dois juntam as notas (45% analista, 55% chefe, mínimo
+60%, veto do chefe reprova sozinho) e, se aprovado, o analista volta e executa.
+
+Por enquanto **tudo é fictício** (`public/escritorio/mercado.js`): nada sai do navegador. Para ligar
+em dados reais, troque a fonte do mercado e a execução por chamadas à API do bot; a lógica de
+decisão está separada do desenho em `public/escritorio/decisao.js` (testada em
+`tests/escritorio.test.ts`).
+
+| Arquivo | O quê |
+|---|---|
+| `public/escritorio/mercado.js` | mercado fictício com regimes de alta/baixa, horário da B3 e do câmbio, indicadores |
+| `public/escritorio/decisao.js` | proposta do analista, verificação do chefe, decisão conjunta, carteira |
+| `public/escritorio/desenho.js` | cenário, mesas, monitores, robôs, balões, holograma, partículas |
+| `public/escritorio/escritorio.js` | coreografia (fila, reunião, volta), laço de animação e painel lateral |
+
 ## Rodar local
 
 Precisa de Node 22 e um Postgres 16.

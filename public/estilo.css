@@ -73,3 +73,28 @@ pre { white-space: pre-wrap; word-break: break-all; background: var(--fundo); bo
 }
 dialog { border: 1px solid var(--borda); border-radius: 10px; background: var(--cartao); color: var(--texto); max-width: min(680px, calc(100% - 32px)); width: 100%; }
 dialog::backdrop { background: rgba(0, 0, 0, .45); }
+
+/* ------------------------------------------------------------------ escritório virtual */
+main:has(.escritorio) { max-width: 1680px; }
+.escritorio { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+.escritorio-palco { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--borda); background: #1d2433; }
+.escritorio-palco:fullscreen { display: flex; align-items: center; justify-content: center; background: #000; border: 0; border-radius: 0; }
+.escritorio-canvas { display: block; width: 100%; cursor: pointer; }
+.escritorio-palco:fullscreen .escritorio-canvas { width: min(100vw, calc(100vh * 16 / 9)); height: auto !important; }
+.escritorio-lado { display: grid; gap: 10px; max-height: calc(100vh - 140px); overflow-y: auto; padding-right: 4px; }
+.escritorio-lado h2 { margin: 8px 0 0; }
+.escritorio-cartoes { display: grid; gap: 8px; }
+.escritorio-cartao { background: var(--cartao); border: 1px solid var(--borda); border-left: 4px solid var(--primaria); border-radius: 8px; padding: 8px 10px; cursor: pointer; display: grid; gap: 3px; }
+.escritorio-cartao.selecionado { outline: 2px solid var(--alerta); }
+.escritorio-cartao-topo { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.escritorio-registro { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.escritorio-registro > li { background: var(--cartao); border: 1px solid var(--borda); border-radius: 8px; padding: 8px 10px; display: grid; gap: 3px; animation: entrar .35s ease-out; }
+.escritorio-registro > li.aprovado { border-left: 4px solid var(--ok); }
+.escritorio-registro > li.reprovado { border-left: 4px solid var(--perigo); }
+.escritorio-itens { list-style: none; margin: 2px 0 0; padding: 0; font-size: 12px; display: grid; gap: 1px; }
+@keyframes entrar { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .escritorio-registro > li { animation: none; } }
+@media (max-width: 980px) {
+  .escritorio { grid-template-columns: 1fr; }
+  .escritorio-lado { max-height: none; overflow: visible; }
+}
