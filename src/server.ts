@@ -1,9 +1,11 @@
 import { criarApp } from './app.js';
 import { config } from './config.js';
 import { migrar, pool } from './db.js';
+import { fecharAnalisesInterrompidas } from './analise/index.js';
 import { logger } from './logger.js';
 
 await migrar();
+await fecharAnalisesInterrompidas();
 
 const servidor = criarApp().listen(config.porta, () => {
   logger.info(

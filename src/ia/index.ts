@@ -15,19 +15,32 @@ function chaveDo(c: ConectorIa): string | null {
   return c.api_key_cifrada ? decifrar(c.api_key_cifrada, chave) : null;
 }
 
-async function chamar(c: ConectorIa, sistema: string, texto: string, querJson: boolean): Promise<string> {
+export interface OpcoesChamada {
+  /** JSON Schema da resposta; no Claude vira saída estruturada, nos outros vai como JSON livre */
+  esquema?: Record<string, unknown>;
+  /** pesquisa na web (só Claude) */
+  pesquisaWeb?: boolean;
+  timeoutSeg?: number;
+}
+
+/** Chama um conector qualquer e devolve o texto da resposta. Lança ErroIa. */
+export async function chamarIa(c: ConectorIa, sistema: string, texto: string, op: OpcoesChamada = {}): Promise<string> {
   const apiKey = chaveDo(c);
   if (c.provedor === 'anthropic') {
     if (!apiKey) throw new ErroIa('conector Claude sem chave de API');
-    return chamarClaude(c, apiKey, sistema, texto, querJson ? ESQUEMA_PARECER : undefined);
+    return chamarClaude(c, apiKey, sistema, texto, op);
   }
-  return chamarCompativel(c, apiKey, sistema, texto, querJson);
+  return chamarCompativel(c, apiKey, sistema, texto, Boolean(op.esquema), op.timeoutSeg);
 }
 
-function mensagemDeErro(c: ConectorIa, e: unknown): string {
+const chamar = (c: ConectorIa, sistema: string, texto: string, querJson: boolean) =>
+  chamarIa(c, sistema, texto, querJson ? { esquema: ESQUEMA_PARECER } : {});
+
+export function mensagemDeErro(c: ConectorIa, e: unknown): string {
   if (e instanceof ErroIa) return e.message;
-  logger.warn({ conector: c.id, err: (e as Error).message }, 'falha inesperada no conector de IA');
-  return limparErro((e as Error).message ?? 'erro desconhecido', null);
+  const msg = limparErro((e as Error).message ?? 'erro desconhecido', null);
+  logger.warn({ conector: c.id, err: msg }, 'falha inesperada no conector de IA');
+  return msg;
 }
 
 /** Pede o parecer de uma IA. Nunca lança: falha vira resposta com ok=false. */

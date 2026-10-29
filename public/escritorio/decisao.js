@@ -114,6 +114,22 @@ export function decidirJuntos(proposta, verificacao) {
   };
 }
 
+/**
+ * Conselho de IAs (opcional, com IAs de verdade pela API do bot): só pode vetar, e a maioria dos
+ * que responderam decide. Stop e alvo (propostas urgentes) não são vetados: sair de posição não
+ * depende de IA. Sem respostas, a decisão fica como estava.
+ */
+export function aplicarConselho(decisao, respostas, podeVetar = true) {
+  if (!respostas?.length) return decisao;
+  const validas = respostas.filter((r) => r.ok);
+  const vetos = validas.filter((r) => r.parecer.decisao === 'vetar').length;
+  const conselho = { respostas, vetos, aprovacoes: validas.length - vetos, falhas: respostas.length - validas.length };
+  if (podeVetar && decisao.aprovado && vetos > validas.length - vetos) {
+    return { ...decisao, aprovado: false, motivo: `conselho de IAs vetou (${vetos} de ${validas.length})`, conselho };
+  }
+  return { ...decisao, conselho };
+}
+
 /** Executa a ordem fictícia na carteira do robô e devolve o resultado da operação (venda). */
 export function executar(carteira, lado, preco) {
   if (lado === 'compra') {

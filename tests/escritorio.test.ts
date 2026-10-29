@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error módulo JS do painel, sem tipos
-import { analisar, decidirJuntos, executar, novaCarteira, verificarChefe, MAX_POSICOES_ABERTAS } from '../public/escritorio/decisao.js';
+import { analisar, aplicarConselho, decidirJuntos, executar, novaCarteira, verificarChefe, MAX_POSICOES_ABERTAS } from '../public/escritorio/decisao.js';
 // @ts-expect-error módulo JS do painel, sem tipos
 import { calcularMedias, criarMercadoFicticio, ifr, media } from '../public/escritorio/mercado.js';
 
@@ -82,6 +82,24 @@ describe('chefe e decisão conjunta', () => {
     const d = decidirJuntos({ confianca: 1 }, { itens: [{ ok: false }], nota: 0 });
     expect(d.combinada).toBeCloseTo(0.45);
     expect(d.aprovado).toBe(false);
+  });
+});
+
+describe('conselho de IAs', () => {
+  const aprovado = { aprovado: true, combinada: 0.7, motivo: 'nota conjunta acima do mínimo' };
+  const voto = (decisao: string) => ({ ok: true, conector: 'x', parecer: { decisao, confianca: 0.8, motivo: '' } });
+
+  it('maioria de vetos reprova; empate não', () => {
+    expect(aplicarConselho(aprovado, [voto('vetar'), voto('vetar'), voto('aprovar')])).toMatchObject({ aprovado: false, motivo: 'conselho de IAs vetou (2 de 3)' });
+    expect(aplicarConselho(aprovado, [voto('vetar'), voto('aprovar')]).aprovado).toBe(true);
+  });
+
+  it('nunca aprova o que o chefe reprovou; stop não é vetado; sem respostas nada muda', () => {
+    const reprovado = { ...aprovado, aprovado: false };
+    expect(aplicarConselho(reprovado, [voto('aprovar')]).aprovado).toBe(false);
+    expect(aplicarConselho(aprovado, [voto('vetar')], false)).toMatchObject({ aprovado: true, conselho: { vetos: 1 } });
+    expect(aplicarConselho(aprovado, undefined)).toBe(aprovado);
+    expect(aplicarConselho(aprovado, [{ ok: false }]).aprovado).toBe(true);
   });
 });
 

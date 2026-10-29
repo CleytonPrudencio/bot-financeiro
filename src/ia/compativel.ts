@@ -33,6 +33,7 @@ export async function chamarCompativel(
   sistema: string,
   texto: string,
   querJson: boolean,
+  timeoutSeg = c.timeout_seg,
 ): Promise<string> {
   if (!c.url_base) throw new ErroIa('conector sem URL base');
   const url = c.url_base.replace(/\/+$/, '') + '/chat/completions';
@@ -52,7 +53,7 @@ export async function chamarCompativel(
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
         body: corpo(comFormato),
-        signal: AbortSignal.timeout(c.timeout_seg * 1000),
+        signal: AbortSignal.timeout(timeoutSeg * 1000),
         redirect: 'error',
       });
     } catch (e) {

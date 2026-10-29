@@ -17,31 +17,42 @@ export const MODELOS_CLAUDE = [
 
 const MAX_TOKENS = { low: 4096, medium: 8192, high: 16000 } as const;
 
-export async function chamarClaude(
-  c: ConectorIa,
-  apiKey: string,
-  sistema: string,
-  texto: string,
-  esquema?: Record<string, unknown>,
-): Promise<string> {
-  const cliente = new Anthropic({ apiKey, timeout: c.timeout_seg * 1000, maxRetries: 0 });
+export interface OpcoesClaude {
+  /** JSON Schema da resposta (saída estruturada). Não vale junto com a pesquisa na web. */
+  esquema?: Record<string, unknown>;
+  /** Liga a ferramenta de pesquisa na web do servidor da Anthropic (custo extra por busca). */
+  pesquisaWeb?: boolean;
+  /** Tempo máximo em segundos; padrão: o do conector. */
+  timeoutSeg?: number;
+}
+
+export async function chamarClaude(c: ConectorIa, apiKey: string, sistema: string, texto: string, op: OpcoesClaude = {}): Promise<string> {
+  const cliente = new Anthropic({ apiKey, timeout: (op.timeoutSeg ?? c.timeout_seg) * 1000, maxRetries: 0 });
+  const mensagens: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: texto }];
   let r;
-  try {
-    r = await cliente.beta.messages.create({
-      model: c.modelo,
-      max_tokens: MAX_TOKENS[c.esforco],
-      system: sistema,
-      messages: [{ role: 'user', content: texto }],
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      output_config: {
-        effort: c.esforco,
-        ...(esquema ? { format: { type: 'json_schema' as const, schema: esquema } } : {}),
-      },
-    });
-  } catch (e) {
-    throw new ErroIa(erroClaude(e));
+  // a pesquisa na web pode pausar o turno (pause_turn): devolve o turno para o servidor continuar
+  for (let volta = 0; volta < 4; volta++) {
+    try {
+      r = await cliente.beta.messages.create({
+        model: c.modelo,
+        max_tokens: MAX_TOKENS[c.esforco],
+        system: sistema,
+        messages: mensagens,
+        betas: ['server-side-fallback-2026-07-01'],
+        fallbacks: 'default',
+        ...(op.pesquisaWeb ? { tools: [{ type: 'web_search_20260209' as const, name: 'web_search' as const, max_uses: 4 }] } : {}),
+        output_config: {
+          effort: c.esforco,
+          ...(op.esquema && !op.pesquisaWeb ? { format: { type: 'json_schema' as const, schema: op.esquema } } : {}),
+        },
+      });
+    } catch (e) {
+      throw new ErroIa(erroClaude(e));
+    }
+    if (r.stop_reason !== 'pause_turn') break;
+    mensagens.push({ role: 'assistant', content: r.content });
   }
+  if (!r || r.stop_reason === 'pause_turn') throw new ErroIa('a pesquisa na web não terminou a tempo');
   if (r.stop_reason === 'refusal') throw new ErroIa('o modelo recusou responder');
   if (r.stop_reason === 'max_tokens') throw new ErroIa('resposta cortada no limite de tokens');
   const saida = r.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('').trim();

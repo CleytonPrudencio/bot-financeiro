@@ -19,6 +19,14 @@ Escreva em português do Brasil, código e comentários inclusive.
 5. Painel sem `innerHTML` com dado de fora: monte com `h()` (usa `textContent`). CSP é só `'self'`.
 6. Toda chamada que muda algo na API precisa do cabeçalho `X-Painel: 1` (CSRF).
 7. Migração aplicada não se edita: nova em `migrations/NNN_nome.sql`.
+8. **IA só barra.** Parecer das IAs e nota da análise rodam depois de `avaliar` e só podem rejeitar:
+   nunca criam ordem, nunca mudam valor ou lado, e `zerar` nunca passa por eles. A regra fica em
+   `src/risco.ts` (`decidirComIa`, `conferirAnalise`). Obrigatório sem IA para consultar = não sai.
+9. Claude pelo SDK oficial (`src/ia/anthropic.ts`); os outros provedores pelo formato da OpenAI
+   (`src/ia/compativel.ts`). Chave de IA cifrada como as das exchanges; erro de provedor passa por
+   `limparErro` antes de ir para a tela ou o log.
+10. PATCH só muda os campos enviados (`soEnviados`): os `.default()` do zod não podem sobrescrever o
+    que não veio.
 
 ## Comandos
 

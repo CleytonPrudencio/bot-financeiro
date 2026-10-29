@@ -4,27 +4,29 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow" />
+    <meta name="color-scheme" content="dark light" />
     <title>Bot Financeiro</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="/fontes/inter.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/estilo.css" />
+    <script src="/js/tema.js"></script>
   </head>
   <body>
-    <header id="topo" hidden>
-      <strong class="marca">Bot Financeiro</strong>
-      <nav>
-        <a href="#/painel">Painel</a>
-        <a href="#/escritorio">Escritório</a>
-        <a href="#/estrategias">Estratégias</a>
-        <a href="#/contas">Contas</a>
-        <a href="#/sinais">Sinais</a>
-        <a href="#/ordens">Ordens</a>
-        <a href="#/auditoria">Auditoria</a>
-      </nav>
-      <span id="quem"></span>
-      <button id="sair" class="secundario">Sair</button>
-    </header>
-    <div id="faixa" hidden></div>
-    <main id="conteudo"></main>
-    <div id="aviso" role="status" hidden></div>
+    <div id="login"></div>
+    <div id="app" hidden>
+      <aside class="lateral" id="lateral">
+        <a class="marca" href="#/painel" id="marca"></a>
+        <nav class="menu" id="menu" aria-label="Seções"></nav>
+        <div class="lateral-pe" id="lateral-pe"></div>
+      </aside>
+      <div class="fundo-menu" id="fundo-menu"></div>
+      <div class="principal">
+        <header class="topo" id="topo"></header>
+        <div class="faixa" id="faixa" hidden></div>
+        <main id="conteudo" class="conteudo"></main>
+      </div>
+    </div>
+    <div id="avisos" class="avisos" aria-live="polite"></div>
     <script type="module" src="/app.js"></script>
   </body>
 </html>

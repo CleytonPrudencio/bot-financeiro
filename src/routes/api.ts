@@ -8,6 +8,8 @@ import { query, transacao, umOuNada } from '../db.js';
 import { corretoraReal, type Conta, type Estrategia } from '../motor.js';
 import { cotacaoPublica, exchangePublica, exchangesSuportadas } from '../brokers/ccxt.js';
 import { moedas } from '../brokers/tipos.js';
+import { iniciarAnalise } from '../analise/index.js';
+import { AGENTES } from '../analise/agentes.js';
 import {
   consultarIas, MODELOS_CLAUDE, pedirParecer, perguntarIas, PEDIDO_DE_TESTE, PRESETS_COMPATIVEIS,
   type ConectorIa, type PedidoParecer,
@@ -331,6 +333,8 @@ const esquemaEstrategia = z
     ia_confianca_min: z.number().min(0).max(1).default(0.6),
     ia_nas_vendas: z.boolean().default(false),
     ia_contexto: z.string().trim().max(2000).nullable().default(null),
+    analise_nota_min: z.number().int().min(0).max(100).nullable().default(null),
+    analise_validade_h: z.number().int().min(1).max(720).default(24),
   });
 
 function conferirLimites(e: { valor_ordem: number; limite_por_ordem: number; limite_diario: number }): void {
@@ -376,11 +380,13 @@ api.post('/estrategias', async (req, res) => {
   const r = await query<Estrategia>(
     `insert into estrategias (nome, conta_id, simbolo, ativa, real, token_hash, token_prefixo, valor_ordem, limite_por_ordem,
                               limite_diario, limite_posicao, intervalo_min_seg, desvio_max_pct, ips_permitidos,
-                              ia_modo, ia_conectores, ia_quorum, ia_falha, ia_confianca_min, ia_nas_vendas, ia_contexto)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) returning id`,
+                              ia_modo, ia_conectores, ia_quorum, ia_falha, ia_confianca_min, ia_nas_vendas, ia_contexto,
+                              analise_nota_min, analise_validade_h)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23) returning id`,
     [d.nome, d.conta_id, d.simbolo, d.ativa, d.real, t.hash, t.prefixo, d.valor_ordem, d.limite_por_ordem,
       d.limite_diario, d.limite_posicao, d.intervalo_min_seg, d.desvio_max_pct, d.ips_permitidos || null,
-      d.ia_modo, d.ia_conectores, d.ia_quorum, d.ia_falha, d.ia_confianca_min, d.ia_nas_vendas, d.ia_contexto || null],
+      d.ia_modo, d.ia_conectores, d.ia_quorum, d.ia_falha, d.ia_confianca_min, d.ia_nas_vendas, d.ia_contexto || null,
+      d.analise_nota_min, d.analise_validade_h],
   );
   await evento(req.usuarioId, 'estrategia_criada', { estrategia: r[0]!.id, real: d.real });
   // o token só aparece agora; no banco fica só o hash
@@ -405,12 +411,12 @@ api.patch('/estrategias/:id', async (req, res) => {
     `update estrategias set nome = $2, simbolo = $3, ativa = $4, real = $5, valor_ordem = $6, limite_por_ordem = $7,
             limite_diario = $8, limite_posicao = $9, intervalo_min_seg = $10, desvio_max_pct = $11, ips_permitidos = $12,
             ia_modo = $13, ia_conectores = $14, ia_quorum = $15, ia_falha = $16, ia_confianca_min = $17,
-            ia_nas_vendas = $18, ia_contexto = $19
+            ia_nas_vendas = $18, ia_contexto = $19, analise_nota_min = $20, analise_validade_h = $21
       where id = $1`,
     [estId, novo.nome, novo.simbolo, novo.ativa, novo.real, novo.valor_ordem, novo.limite_por_ordem, novo.limite_diario,
       novo.limite_posicao, novo.intervalo_min_seg, novo.desvio_max_pct, novo.ips_permitidos || null,
       novo.ia_modo, novo.ia_conectores, novo.ia_quorum, novo.ia_falha, novo.ia_confianca_min, novo.ia_nas_vendas,
-      novo.ia_contexto || null],
+      novo.ia_contexto || null, novo.analise_nota_min, novo.analise_validade_h],
   );
   await evento(req.usuarioId, 'estrategia_alterada', { estrategia: estId, mudou: d });
   res.json({ ok: true });
@@ -631,6 +637,53 @@ api.post('/ias/parecer', limiteIa, async (req, res) => {
     ...(d.extras ? { extras: d.extras } : {}),
   };
   res.json(await consultarIas(conectores, pedido));
+});
+
+// ------------------------------------------------------------------ análise com 5 agentes
+
+const limiteAnalise = rateLimit({ windowMs: 10 * 60_000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false });
+
+api.get('/analises/agentes', (_req, res) => {
+  res.json(AGENTES.map(({ id, nome, peso, subnotas }) => ({ id, nome, peso, subnotas })));
+});
+
+api.post('/analises', limiteAnalise, async (req, res) => {
+  const d = validar(
+    z.object({
+      simbolo: z.string().trim().toUpperCase().min(1).max(40).regex(/^[A-Z0-9.\-_/:]+$/, 'use BTC/USDT ou um ticker'),
+      exchange: z.string().trim().max(40).nullable().optional(),
+      conectores: z.array(z.number().int().positive()).max(20).optional(),
+      pesquisa_web: z.boolean().default(false),
+    }),
+    req.body,
+  );
+  if (d.exchange && !exchangesSuportadas().includes(d.exchange)) throw new ErroPedido(`exchange "${d.exchange}" não suportada`);
+  const conectores = await conectoresEscolhidos(d.conectores);
+  const id = await iniciarAnalise({
+    simbolo: d.simbolo,
+    // sem barra não é par de exchange (ex.: PETR4): os agentes trabalham sem as velas
+    exchange: d.simbolo.includes('/') ? d.exchange ?? 'binance' : null,
+    conectores,
+    pesquisaWeb: d.pesquisa_web,
+    usuarioId: req.usuarioId,
+  });
+  await evento(req.usuarioId, 'analise_pedida', { analise: id, simbolo: d.simbolo, conectores: conectores.map((c) => c.id), pesquisa_web: d.pesquisa_web });
+  res.status(202).json({ id });
+});
+
+api.get('/analises', async (_req, res) => {
+  res.json(
+    await query(
+      `select id, simbolo, exchange, situacao, nota, conceito, sinal, pesquisa_web, criada_em, terminada_em from analises
+        order by criada_em desc limit 40`,
+    ),
+  );
+});
+
+api.get('/analises/:id', async (req, res) => {
+  const a = await umOuNada('select * from analises where id = $1', [id(req)]);
+  if (!a) return void res.status(404).json({ erro: 'análise não existe' });
+  res.json(a);
 });
 
 // ------------------------------------------------------------------ erros

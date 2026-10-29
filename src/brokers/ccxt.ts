@@ -53,6 +53,18 @@ export async function cotacaoPublica(exchangeId: string, simbolo: string): Promi
   return preco;
 }
 
+/** Velas diárias públicas (as mais recentes por último). */
+export async function velasDiarias(exchangeId: string, simbolo: string, limite = 400) {
+  const ex = await exchangePublica(exchangeId);
+  if (!ex.has?.fetchOHLCV) throw new Error(`a ${exchangeId} não fornece velas (OHLCV)`);
+  if (!ex.markets?.[simbolo]) throw new Error(`o par ${simbolo} não existe na ${exchangeId}`);
+  const desde = Date.now() - limite * 86_400_000;
+  const linhas = await ex.fetchOHLCV(simbolo, '1d', desde, limite);
+  return linhas
+    .filter((l) => l.every((x) => typeof x === 'number'))
+    .map((l) => ({ t: l[0] as number, abre: l[1] as number, max: l[2] as number, min: l[3] as number, fecha: l[4] as number, volume: l[5] as number }));
+}
+
 export class CorretoraCcxt implements Corretora {
   private ex: Promise<Exchange>;
 

@@ -5,7 +5,7 @@
 //   const escritorio = montarEscritorio(elemento); ...; escritorio.parar();
 
 import { criarMercadoFicticio, formatarPreco, ifr, aleatorio } from './mercado.js';
-import { analisar, decidirJuntos, executar, novaCarteira, verificarChefe } from './decisao.js';
+import { analisar, aplicarConselho, decidirJuntos, executar, novaCarteira, verificarChefe, VALOR_POR_ORDEM } from './decisao.js';
 import * as D from './desenho.js';
 
 const PASSO_MERCADO = 0.25; // segundos (já com a velocidade) por passo do mercado
@@ -66,6 +66,9 @@ export function montarEscritorio(raiz, opcoes = {}) {
   let selecionado = null;
   const particulas = [];
   const registro = [];
+  // conselho de IAs: consulta as IAs de verdade (custa créditos), por isso começa desligado
+  let conselhoLigado = false;
+  const podeConselho = Boolean(opcoes.consultarIa) && (opcoes.iasAtivas ?? 0) > 0;
 
   // ---------------------------------------------------------------- robôs
 
@@ -209,6 +212,25 @@ export function montarEscritorio(raiz, opcoes = {}) {
     const lado = proposta.lado === 'compra' ? 'COMPRA' : 'VENDA';
     r.flash = { texto: `SINAL: ${lado}`, cor: 'rgba(255, 209, 102, ALFA)', ate: tempo + 1.4, duracao: 1.4 };
     falar(r, proposta.urgente ? `${proposta.motivo}! Preciso falar com o chefe.` : `Opa, sinal de ${lado.toLowerCase()} em ${r.ativo.simbolo}.`, 1.8);
+    r.respostasIa = undefined;
+    r.consultaIa = conselhoLigado
+      ? opcoes
+          .consultarIa({
+            simbolo: r.ativo.simbolo,
+            lado: proposta.lado,
+            cotacao: proposta.preco,
+            ...(proposta.lado === 'compra' ? { valor: VALOR_POR_ORDEM } : r.carteira.quantidade > 0 ? { quantidade: r.carteira.quantidade } : {}),
+            contexto: `Escritório virtual com dados FICTÍCIOS. Proposta do robô analista: ${proposta.motivo}. Confiança do analista ${pct(proposta.confianca)}.`,
+            extras: {
+              media_9: proposta.indicadores?.curta ?? null,
+              media_26: proposta.indicadores?.longa ?? null,
+              ifr_14: proposta.indicadores?.ifr ?? null,
+              volatilidade_dia: r.ativo.volDia,
+            },
+          })
+          .then((x) => (r.respostasIa = x))
+          .catch((e) => (r.respostasIa = [{ ok: false, conector: 'IAs', erro: e.message, ms: 0 }]))
+      : null;
     agendar(r, 1.1, () => {
       r.emocao = 'normal';
       r.segurandoTablet = true;
@@ -248,9 +270,17 @@ export function montarEscritorio(raiz, opcoes = {}) {
     r.deCostas = true;
     r.gesticulando = true;
     r.emocao = 'normal';
+    // o conselho de IAs ainda não respondeu: o chefe espera (no máximo o tempo das IAs)
+    if (r.consultaIa && r.respostasIa === undefined) {
+      chefe.emocao = 'pensando';
+      falar(chefe, 'Um momento: consultando o conselho de IAs…', 2.4, { deslocX: 120 });
+      r.consultaIa.finally(() => comecarReuniao(r));
+      r.consultaIa = null;
+      return;
+    }
     const p = r.proposta;
     const verificacao = verificarChefe(p, r.ativo, r.carteira, posicoesAbertas());
-    const decisao = decidirJuntos(p, verificacao);
+    const decisao = aplicarConselho(decidirJuntos(p, verificacao), r.respostasIa, !p.urgente);
     // linha do tempo da reunião (segundos desde o começo): o analista fala, o holograma abre, os
     // itens do chefe aparecem um a um, as notas, o carimbo e o holograma fecha antes das respostas
     const itens = 2.9;
@@ -274,7 +304,8 @@ export function montarEscritorio(raiz, opcoes = {}) {
     const tNotas = tempos.notas;
     const tCarimbo = tempos.carimbo;
     agendar(chefe, tNotas, () => {
-      falar(chefe, `Minha nota: ${pct(verificacao.nota)}. Juntos: ${pct(decisao.combinada)}.`, 1.8, { deslocX: 120 });
+      const c = decisao.conselho;
+      falar(chefe, `Minha nota: ${pct(verificacao.nota)}. Juntos: ${pct(decisao.combinada)}.${c ? `\nIAs: ${c.aprovacoes} a favor, ${c.vetos} contra.` : ''}`, 1.8, { deslocX: 120 });
     });
     agendar(chefe, tCarimbo, () => {
       chefe.emocao = decisao.aprovado ? 'feliz' : 'triste';
@@ -480,6 +511,12 @@ export function montarEscritorio(raiz, opcoes = {}) {
     { class: 'escritorio-lado' },
     h('div', { class: 'acoes' }, botaoPausa, ...botoesVel, botaoTela),
     h('p', { class: 'rotulo' }, 'Dados fictícios: nenhuma ordem de verdade sai desta tela. Clique num robô para ver os detalhes.'),
+    podeConselho
+      ? h('label', { class: 'interruptor escritorio-conselho-botao' },
+          h('input', { type: 'checkbox', onchange: (ev) => (conselhoLigado = ev.target.checked) }),
+          h('span', { class: 'interruptor-trilho' }, h('span', { class: 'interruptor-bola' })),
+          h('span', { class: 'interruptor-texto' }, h('span', {}, 'Conselho de IAs na reunião'), h('small', { class: 'rotulo' }, 'consulta as IAs de verdade em cada proposta (gasta créditos); elas só podem vetar')))
+      : null,
     h('div', { class: 'escritorio-cartoes' }, cartoes.map((c) => c.el)),
     h('h2', {}, 'Decisões'),
     listaRegistro,
@@ -559,6 +596,12 @@ export function montarEscritorio(raiz, opcoes = {}) {
           h('div', { class: 'rotulo' }, `${e.hora} · ${formatarPreco(e.robo.ativo, p.preco)} · ${p.motivo}`),
           h('div', { class: 'rotulo' }, `analista ${pct(p.confianca)} · chefe ${pct(e.verificacao.nota)} · juntos ${pct(e.decisao.combinada)} · ${e.decisao.motivo}`),
           h('ul', { class: 'escritorio-itens' }, e.verificacao.itens.map((i) => h('li', { class: i.ok ? 'ok' : 'perigo-txt' }, `${i.ok ? '✔' : '✖'} ${i.texto}`))),
+          e.decisao.conselho
+            ? h('ul', { class: 'escritorio-itens escritorio-conselho' }, e.decisao.conselho.respostas.map((x) =>
+                x.ok
+                  ? h('li', { class: x.parecer.decisao === 'aprovar' ? 'ok' : 'perigo-txt' }, `${x.parecer.decisao === 'aprovar' ? '✔' : '✖'} IA ${x.conector} (${pct(x.parecer.confianca)}): ${x.parecer.motivo}`)
+                  : h('li', { class: 'rotulo' }, `… IA ${x.conector} falhou: ${x.erro}`)))
+            : null,
           e.execucao
             ? h('div', { class: 'rotulo' }, `executado a ${formatarPreco(e.robo.ativo, e.execucao.preco)}${p.lado === 'venda' ? ` · resultado ${e.execucao.resultado >= 0 ? '+' : ''}${e.execucao.resultado.toFixed(2)}` : ''}`)
             : null,

@@ -3,7 +3,7 @@ import { config } from './config.js';
 import { derivarChave, decifrar, hashToken } from './crypto.js';
 import { transacao, umOuNada } from './db.js';
 import { logger } from './logger.js';
-import { avaliar, consultaIa, decidirComIa, type EstadoRisco, type PoliticaIa } from './risco.js';
+import { avaliar, conferirAnalise, consultaIa, decidirComIa, type AnaliseRecente, type EstadoRisco, type PoliticaIa } from './risco.js';
 import { consultarIas, type ConectorIa, type RespostaIa } from './ia/index.js';
 import { lerSinal, type Sinal } from './sinal.js';
 import { CorretoraCcxt, cotacaoPublica } from './brokers/ccxt.js';
@@ -46,6 +46,8 @@ export interface Estrategia {
   ia_confianca_min: number;
   ia_nas_vendas: boolean;
   ia_contexto: string | null;
+  analise_nota_min: number | null;
+  analise_validade_h: number;
 }
 
 export function politicaIa(e: Estrategia): PoliticaIa {
@@ -202,6 +204,19 @@ export async function processarSinal(token: string, corpo: unknown, ip: string |
       const motivo = 'sem cotação da exchange (e o sinal não trouxe "preco" para a simulação)';
       await registrarSinal(c, est.id, sinal, corpo, ip, 'rejeitado', motivo);
       return { status: 200, situacao: 'rejeitado', motivo };
+    }
+
+    // Nota da análise dos 5 agentes, se a estratégia exige (só compras; só barra)
+    if (est.analise_nota_min !== null && sinal.acao === 'comprar') {
+      const ultima = (await c.query<AnaliseRecente>(
+        `select nota, terminada_em from analises where simbolo = $1 and situacao = 'pronta' order by terminada_em desc limit 1`,
+        [est.simbolo],
+      )).rows[0] ?? null;
+      const conferida = conferirAnalise(sinal.acao, ultima, est, new Date());
+      if (!conferida.ok) {
+        await registrarSinal(c, est.id, sinal, corpo, ip, 'rejeitado', conferida.motivo);
+        return { status: 200, situacao: 'rejeitado', motivo: conferida.motivo };
+      }
     }
 
     // Parecer das IAs: só depois que as regras aprovaram, e só para barrar.

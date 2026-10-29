@@ -15,6 +15,11 @@ vi.mock('../src/brokers/ccxt.js', () => ({
   exchangesSuportadas: () => ['binance'],
   exchangePublica: async () => ({ markets: { 'BTC/USDT': {} } }),
   cotacaoPublica: async () => PRECO,
+  velasDiarias: async () =>
+    Array.from({ length: 300 }, (_, i) => {
+      const f = PRECO * (0.8 + i / 1000);
+      return { t: Date.UTC(2026, 0, 1) + i * 86_400_000, abre: f, max: f * 1.01, min: f * 0.99, fecha: f, volume: 1000 };
+    }),
   CorretoraCcxt: class {
     constructor() {
       throw new Error('o teste não fala com exchange real');
@@ -251,6 +256,31 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     respostaIa = 'BTC está volátil.';
     const r = await painel('POST', '/ias/perguntar', { pergunta: 'Como está o BTC?' });
     expect(r.corpo).toMatchObject([{ ok: true, texto: 'BTC está volátil.' }]);
+  });
+
+  it('análise com 5 agentes: roda em segundo plano, dá a nota e trava a compra abaixo do mínimo', async () => {
+    const subnotas = [14, 14, 14, 14, 14].map((nota, i) => ({ nome: `s${i}`, nota }));
+    respostaIa = JSON.stringify({ subnotas, sinal: 'Alta', resumo: 'tendência de alta', pontos: ['p'], niveis: { entrada_min: 1, entrada_max: 2, stop: 0.5, alvo1: 3, alvo2: 4 } });
+    const pedido = await painel('POST', '/analises', { simbolo: 'btc/usdt', exchange: 'binance' });
+    expect(pedido.status).toBe(202);
+    let a: Record<string, unknown> = {};
+    for (let i = 0; i < 50 && a.situacao !== 'pronta'; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      a = (await painel('GET', `/analises/${pedido.corpo.id}`)).corpo;
+    }
+    expect(a).toMatchObject({ situacao: 'pronta', simbolo: 'BTC/USDT', nota: 70, conceito: 'A', sinal: 'Compra' });
+    expect(Object.keys(a.agentes as object).sort()).toEqual(['fundamental', 'risco', 'sentimento', 'tecnico', 'tese']);
+    expect((a.dados as { media_200d: number }).media_200d).toBeGreaterThan(0);
+    // os agentes recebem os indicadores calculados das velas
+    expect(pedidosIa.at(-1)!.corpo.messages[1]!.content).toContain('ifr_14');
+
+    const [est] = await db.query<{ id: number }>('select id from estrategias');
+    await painel('PATCH', `/estrategias/${est!.id}`, { ia_modo: 'desligado', analise_nota_min: 75 });
+    const r = await sinal({ acao: 'comprar', id: 'an1' });
+    expect(r.corpo).toMatchObject({ situacao: 'rejeitado' });
+    expect(String(r.corpo.motivo)).toMatch(/nota da análise 70 abaixo do mínimo 75/);
+    await painel('PATCH', `/estrategias/${est!.id}`, { analise_nota_min: 60 });
+    expect((await sinal({ acao: 'comprar', id: 'an2' })).corpo).toMatchObject({ situacao: 'executado' });
   });
 
   it('auditoria registrou as ações do painel', async () => {

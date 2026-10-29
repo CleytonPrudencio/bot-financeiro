@@ -62,7 +62,16 @@ export function criarApp() {
 
   app.use('/webhook', webhook);
   app.use('/api', express.json({ limit: '32kb' }), cookieParser(), api);
-  app.use(express.static(pastaPublica, { index: 'index.html', maxAge: config.producao ? '1h' : 0 }));
+  // HTML, JS e CSS revalidam a cada carga (ETag): depois de um deploy, nenhum módulo antigo fica
+  // misturado com um novo. As fontes não mudam e ficam um ano.
+  app.use(
+    express.static(pastaPublica, {
+      index: 'index.html',
+      setHeaders: (res, arquivo) => {
+        res.setHeader('cache-control', arquivo.endsWith('.woff2') ? 'public, max-age=31536000, immutable' : 'no-cache');
+      },
+    }),
+  );
 
   app.use((_req, res) => {
     res.status(404).json({ erro: 'não encontrado' });

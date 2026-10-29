@@ -147,3 +147,29 @@ export function decidirComIa(votos: VotoIa[], p: PoliticaIa): { aprovado: boolea
     motivo: `IA barrou: ${placar}; precisava de ${precisa} aprovação(ões) com confiança ≥ ${Math.round(p.confiancaMin * 100)}%`,
   };
 }
+
+// ------------------------------------------------------------------ análise dos 5 agentes
+//
+// Trava opcional da estratégia: só COMPRA se houver uma análise pronta e recente do par com nota
+// mínima. Como a IA, só barra; venda e zerar nunca dependem dela.
+
+export interface AnaliseRecente {
+  nota: number;
+  terminada_em: Date;
+}
+
+export function conferirAnalise(
+  acao: Sinal['acao'],
+  analise: AnaliseRecente | null,
+  e: { analise_nota_min: number | null; analise_validade_h: number },
+  agora: Date,
+): { ok: true } | { ok: false; motivo: string } {
+  if (acao !== 'comprar' || e.analise_nota_min === null) return { ok: true };
+  if (!analise) return { ok: false, motivo: `exige análise com nota ≥ ${e.analise_nota_min}, e não há análise pronta deste par` };
+  const horas = (agora.getTime() - analise.terminada_em.getTime()) / 3_600_000;
+  if (horas > e.analise_validade_h) {
+    return { ok: false, motivo: `a última análise do par tem ${Math.floor(horas)} h; a estratégia aceita até ${e.analise_validade_h} h` };
+  }
+  if (analise.nota < e.analise_nota_min) return { ok: false, motivo: `nota da análise ${analise.nota} abaixo do mínimo ${e.analise_nota_min}` };
+  return { ok: true };
+}
