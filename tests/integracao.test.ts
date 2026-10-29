@@ -367,11 +367,11 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     expect(padroes).toHaveLength(1);
     expect(padroes[0]).toMatchObject({
       simbolo: 'BTC/BRL', ativa: true, real: false, valor_ordem: 50, limite_diario: 50, limite_posicao: 50,
-      ia_modo: 'obrigatorio', ia_tipo: 'agente', auto_ligado: true, auto_stop_pct: 3,
+      ia_modo: 'obrigatorio', ia_tipo: 'agente', auto_ligado: true, auto_stop_pct: 3, auto_exigir_virada: false,
     });
     expect(padroes[0]).toMatchObject({ auto_varrer: true, auto_tempo: '15m', auto_intervalo_min: 2 });
     // a série falsa é uma alta reta (IFR 100): o piloto olhou os pares e não entrou
-    expect(String(padroes[0]!.auto_situacao)).toContain('olhou 2 pares em velas de 15m: nenhum virou para alta');
+    expect(String(padroes[0]!.auto_situacao)).toContain('olhou 2 pares em velas de 15m: nenhum está para alta');
     expect(String(padroes[0]!.auto_situacao)).toContain('IFR esticado');
     expect(await saldo('BRL')).toBe(50);
   });

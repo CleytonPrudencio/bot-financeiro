@@ -103,12 +103,13 @@ async function consultasDeHoje(estrategiaId: number): Promise<number> {
   return r?.n ?? 0;
 }
 
-/** Pares em que a compra foi barrada há pouco: ficam de fora por um tempo. */
+/** Pares em que a compra foi barrada, ou que bateram no stop, há pouco: ficam de fora por um tempo. */
 async function paresBarrados(estrategiaId: number): Promise<Set<string>> {
   const linhas = await query<{ simbolo: string }>(
     `select distinct corpo->>'simbolo' as simbolo from sinais
-      where estrategia_id = $1 and corpo->>'id' like 'piloto-entrada-%' and situacao = 'rejeitado'
-        and recebido_em > now() - make_interval(secs => $2)`,
+      where estrategia_id = $1 and recebido_em > now() - make_interval(secs => $2)
+        and ((corpo->>'id' like 'piloto-entrada-%' and situacao = 'rejeitado')
+             or (corpo->>'id' like 'piloto-stop-%' and situacao = 'executado'))`,
     [estrategiaId, ESPERA_DEPOIS_DE_VETO_MS / 1000],
   );
   return new Set(linhas.map((l) => l.simbolo).filter(Boolean));
@@ -166,13 +167,13 @@ async function cuidar(e: EstrategiaPiloto, agora: number): Promise<void> {
   for (const [k, v] of avaliados) if (v < agora) avaliados.delete(k);
   for (const simbolo of pares) {
     if (barrados.has(simbolo)) {
-      anotar(simbolo, 'barrado há pouco, descansa');
+      anotar(simbolo, 'barrado ou stop há pouco: descansa 6 h');
       continue;
     }
     const fechadas = velasFechadas(await velas(e.exchange, simbolo, tempo, 260), agora, duracao);
     const vela = fechadas[fechadas.length - 1]?.t ?? 0;
     const fechamento = fechadas[fechadas.length - 1]?.fecha;
-    const entrada = avaliarEntrada(fechadas);
+    const entrada = avaliarEntrada(fechadas, { exigirVirada: e.auto_exigir_virada });
     if (!entrada.comprar) {
       anotar(simbolo, entrada.motivo.replace(/^sem entrada: /, ''), false, fechamento);
       continue;
@@ -209,7 +210,9 @@ async function cuidar(e: EstrategiaPiloto, agora: number): Promise<void> {
   await gravarVarredura(e.id, olhados);
 
   const olhou = `olhou ${pares.length} ${pares.length === 1 ? 'par' : 'pares'} em velas de ${tempo}`;
-  if (!candidatos.length) return situacao(e.id, `${olhou}: nenhum virou para alta agora. ${resumo.slice(0, 6).join('; ')}`);
+  if (!candidatos.length) {
+    return situacao(e.id, `${olhou}: nenhum ${e.auto_exigir_virada ? 'virou' : 'está'} para alta agora. ${resumo.slice(0, 6).join('; ')}`);
+  }
 
   // o melhor: maior chance de alta no Kronos; empate (ou sem Kronos), o mais negociado
   const melhor = [...candidatos].sort((a, b) => (b.prob ?? -1) - (a.prob ?? -1))[0]!;
@@ -241,7 +244,7 @@ async function cuidarDaPosicao(e: EstrategiaPiloto, agora: number): Promise<void
     stopPct: e.auto_stop_pct, alvoPct: e.auto_alvo_pct, protecaoPct: e.auto_protecao_pct, recuoPct: e.auto_recuo_pct,
   });
   if (saida.sair) {
-    const r = await processarSinalDa(e.id, { acao: 'zerar', preco, id: `piloto-${saida.tipo}-${agora}` }, ORIGEM);
+    const r = await processarSinalDa(e.id, { acao: 'zerar', simbolo: e.simbolo, preco, id: `piloto-${saida.tipo}-${agora}` }, ORIGEM);
     logger.info({ estrategia: e.id, tipo: saida.tipo, resultado: textoResultado(r) }, 'piloto: saída');
     return situacao(e.id, `${e.simbolo}: ${saida.motivo} → ${textoResultado(r)}`);
   }
@@ -338,10 +341,10 @@ export async function garantirEstrategiaPadrao(): Promise<number | null> {
                               limite_diario, limite_posicao, intervalo_min_seg, desvio_max_pct,
                               ia_modo, ia_tipo, ia_falha, ia_confianca_min, ia_nas_vendas, ia_contexto,
                               auto_ligado, auto_stop_pct, auto_alvo_pct, auto_protecao_pct, auto_recuo_pct,
-                              auto_varrer, auto_tempo, auto_intervalo_min)
+                              auto_varrer, auto_tempo, auto_intervalo_min, auto_exigir_virada)
      values ($1, $2, $3, true, false, $4, $5, $6, $6, $6, $6, $7, $8,
              'obrigatorio', 'agente', 'reprova', 0.6, false, $9,
-             true, $10, $11, $12, $13, true, $14, $15) returning id`,
+             true, $10, $11, $12, $13, true, $14, $15, false) returning id`,
     [PADRAO.nome, conta.id, PADRAO.simbolo, t.hash, t.prefixo, PADRAO.valor, PADRAO.intervalo_min_seg, PADRAO.desvio_max_pct,
       PADRAO.ia_contexto, PADRAO.stop, PADRAO.alvo, PADRAO.protecao, PADRAO.recuo, PADRAO.tempo, PADRAO.intervalo_min],
   );

@@ -7,8 +7,9 @@ import { ifr, macd, mediaSimples, type Vela } from '../analise/indicadores.js';
 //   - tendência longa de alta: fechamento acima da média de 200 velas e média de 50 acima da de 200;
 //   - momento a favor: fechamento acima da média de 20 e histograma do MACD positivo;
 //   - sem esticar: IFR entre 40 e 70.
-// O sinal sai só na VIRADA (a vela anterior não cumpria tudo, a última cumpre): assim o agente de IA
-// é consultado só quando algo muda, e não a cada vela enquanto a condição dura.
+// Por padrão o sinal sai só na VIRADA (a vela anterior não cumpria tudo, a última cumpre). Com
+// `exigirVirada: false`, também entra numa tendência já em curso (o piloto limita o custo de IA com
+// o teto diário e deixa de fora por 6 h o par barrado ou que bateu no stop).
 //
 // Com velas curtas (5 min a 4 h), vale também o filtro diário: não compra com o preço abaixo da
 // média de 50 dias (tendência maior contra).
@@ -55,7 +56,7 @@ export function faltas(l: Leitura): string[] {
 export type Entrada = { comprar: true; motivo: string } | { comprar: false; motivo: string };
 
 /** Avalia a última vela fechada contra a anterior. Precisa de 201 velas fechadas, no mínimo. */
-export function avaliarEntrada(fechadas: Vela[]): Entrada {
+export function avaliarEntrada(fechadas: Vela[], { exigirVirada = true }: { exigirVirada?: boolean } = {}): Entrada {
   const fechamentos = fechadas.map((v) => v.fecha);
   if (fechamentos.length < 201) return { comprar: false, motivo: `poucas velas para a média de 200 (${fechamentos.length})` };
   const hoje = ler(fechamentos);
@@ -63,7 +64,11 @@ export function avaliarEntrada(fechadas: Vela[]): Entrada {
   if (!hoje || !ontem) return { comprar: false, motivo: 'indicadores indisponíveis' };
   const falta = faltas(hoje);
   if (falta.length) return { comprar: false, motivo: `sem entrada: ${falta.join('; ')}` };
-  if (!faltas(ontem).length) return { comprar: false, motivo: 'tendência a favor, mas já estava assim na vela anterior: espera a próxima virada' };
+  const jaEstava = !faltas(ontem).length;
+  if (jaEstava && exigirVirada) return { comprar: false, motivo: 'tendência a favor, mas já estava assim na vela anterior: espera a próxima virada' };
+  if (jaEstava) {
+    return { comprar: true, motivo: `tendência de alta em curso: preço acima das médias de 20 e 200 velas, MACD positivo, IFR ${hoje.ifr.toFixed(0)}` };
+  }
   return {
     comprar: true,
     motivo: `virada para alta: preço acima das médias de 20 e 200 velas, MACD positivo, IFR ${hoje.ifr.toFixed(0)}`,

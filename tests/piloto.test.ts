@@ -62,3 +62,20 @@ describe('saída por tendência', () => {
     expect(tendenciaQuebrou(velas([...alta, 100]))).toContain('média de 50');
   });
 });
+
+describe('entrada em tendência já em curso', () => {
+  it('sem exigir a virada, entra numa alta que já vinha da vela anterior; com, espera', () => {
+    const s = serieComVirada();
+    let n = 202;
+    while (!avaliarEntrada(velas(s.slice(0, n))).comprar) n++;
+    // uma vela depois da virada: a alta continua
+    const depois = velas(s.slice(0, n + 1));
+    expect(faltas(ler(s.slice(0, n + 1))!)).toEqual([]);
+    expect(avaliarEntrada(depois)).toMatchObject({ comprar: false, motivo: expect.stringContaining('espera a próxima virada') });
+    expect(avaliarEntrada(depois, { exigirVirada: false })).toMatchObject({ comprar: true, motivo: expect.stringContaining('tendência de alta em curso') });
+  });
+  it('as outras regras continuam valendo sem a virada', () => {
+    const queda = Array.from({ length: 260 }, (_, i) => 300 - i * 0.5);
+    expect(avaliarEntrada(velas(queda), { exigirVirada: false }).comprar).toBe(false);
+  });
+});

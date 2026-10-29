@@ -184,7 +184,9 @@ regras de risco, a trava por estratégia, o agente de IA nas compras e as três 
   MACD positivo e IFR entre 40 e 70, numa vela em que a anterior não cumpria tudo. Com velas curtas,
   a tendência diária também precisa estar a favor (acima da média de 50 dias). O Kronos precisa dar
   50% ou mais de chance de alta; entre vários pares, vai para o agente o de maior chance. Teto de
-  consultas à IA por dia (`auto_max_ia_dia`, padrão 6) e o par barrado descansa 6 h.
+  consultas à IA por dia (`auto_max_ia_dia`, padrão 6); o par barrado, ou que bateu no stop,
+  descansa 6 h. Com **"só comprar na virada"** desligado (`auto_exigir_virada`), também entra numa
+  alta já em curso (é o padrão da estratégia padrão).
 - **Saída**, a cada minuto, sem IA (`conferirSaida` em `src/risco.ts`): stop de perda (padrão 3%),
   alvo (6%), proteção do ganho (depois de +2,5%, um recuo de 1,5% do topo fecha, nunca abaixo do
   preço médio mais as taxas) e, uma vez por dia, fechamento abaixo da média de 50 dias.

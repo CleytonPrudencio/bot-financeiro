@@ -65,6 +65,7 @@ function formEstrategia({ e = {}, contas, ias, aoSalvar }) {
       h('legend', {}, icone('robo'), 'Piloto automático'),
       h('p', { class: 'suave' }, 'O próprio bot gera os sinais, sem TradingView. Compra só quando a tendência diária vira para alta (e o Kronos e as IAs deixam); sai sozinho no stop de perda, no alvo, na proteção do ganho ou quando a tendência quebra. Sair nunca passa pela IA.'),
       interruptor('Ligar o piloto automático', { name: 'auto_ligado', checked: e.auto_ligado }, 'Os sinais do piloto passam pelas mesmas regras e limites do webhook'),
+      interruptor('Só comprar na virada da tendência', { name: 'auto_exigir_virada', checked: e.auto_exigir_virada ?? true }, 'Desligado: também entra numa alta já em curso (mais compras, e mais risco de comprar perto do topo); par barrado ou que bateu no stop descansa 6 h'),
       interruptor('Procurar em todos os pares da moeda', { name: 'auto_varrer', checked: e.auto_varrer }, 'Ex.: todos os pares em BRL da Binance com volume; opera o melhor, um de cada vez (o par da estratégia troca sozinho, só sem posição)'),
       h('div', { class: 'campos' },
         escolha('Velas que o piloto lê', 'auto_tempo', [['5m', '5 minutos'], ['15m', '15 minutos'], ['1h', '1 hora'], ['4h', '4 horas'], ['1d', '1 dia']], e.auto_tempo ?? '1d', 'sempre a última vela fechada'),

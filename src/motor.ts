@@ -62,6 +62,7 @@ export interface Estrategia {
   auto_volume_min: number;
   auto_max_ia_dia: number;
   auto_varrido_em: Date | null;
+  auto_exigir_virada: boolean;
 }
 
 export function politicaIa(e: Estrategia): PoliticaIa {
