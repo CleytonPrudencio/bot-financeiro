@@ -35,7 +35,7 @@ function esteira(etapas, conteudo) {
   return h('div', { class: 'esteira' },
     h('div', { class: 'esteira-etapas' }, escalonar(apoio.map((e, i) => h('div', { class: 'cartao etapa' }, h('div', { class: 'etapa-topo' }, h('span', { class: 'etapa-numero' }, String(i + 1)), h('h3', {}, e.nome)), conteudo(e))))),
     h('div', { class: 'esteira-seta', 'aria-hidden': 'true' }, h('span'), icone('venda')),
-    h('div', { class: 'cartao etapa etapa-decisao' }, h('div', { class: 'etapa-topo' }, h('span', { class: 'etapa-numero' }, '5'), h('h3', {}, final.nome)), conteudo(final)));
+    h('div', { class: 'cartao etapa etapa-decisao' }, h('div', { class: 'etapa-topo' }, h('span', { class: 'etapa-numero' }, String(apoio.length + 1)), h('h3', {}, final.nome)), conteudo(final)));
 }
 
 export async function paginaAgente({ recarregar, aoSair }) {
@@ -50,8 +50,20 @@ export async function paginaAgente({ recarregar, aoSair }) {
   const config = structuredClone(info.config);
   const selects = new Map();
   const webs = new Map();
+  let kronosLigado = null;
 
   const configuracao = esteira(info.etapas, (e) => {
+    if (e.kronos) {
+      const k = info.kronos;
+      const caixa = h('input', { type: 'checkbox', checked: Boolean(config.etapas.previsao?.ligada) });
+      kronosLigado = caixa;
+      return [
+        h('p', { class: 'suave pequeno-texto etapa-papel' }, e.papel.split(':')[1]?.trim() ?? e.papel),
+        h('p', { class: 'etapa-recomendado' }, icone('cotacao'), h('span', {}, h('strong', {}, e.recomendado))),
+        k.ok ? selo(`no ar · ${k.modelo?.split('/').pop() ?? 'Kronos'}`, 'ok') : selo(k.erro ?? 'fora do ar', 'alerta', 'alerta'),
+        h('label', { class: 'interruptor etapa-web' }, caixa, h('span', { class: 'interruptor-trilho' }, h('span', { class: 'interruptor-bola' })), h('span', { class: 'interruptor-texto' }, h('span', {}, 'Usar a previsão'), h('small', { class: 'campo-dica' }, 'roda na VM, sem custo; nada sai para a internet'))),
+      ];
+    }
     const atual = config.etapas[e.id]?.conector_id ?? '';
     const sel = h('select', { 'aria-label': `IA da etapa ${e.nome}` },
       e.id === 'decisao' ? h('option', { value: '' }, 'escolha uma IA…') : h('option', { value: '' }, '— desligada —'),
@@ -68,7 +80,10 @@ export async function paginaAgente({ recarregar, aoSair }) {
   });
 
   const ler = () => ({
-    etapas: Object.fromEntries(info.etapas.map((e) => [e.id, { conector_id: selects.get(e.id).value ? Number(selects.get(e.id).value) : null, ...(webs.has(e.id) ? { web: webs.get(e.id).checked } : {}) }])),
+    etapas: Object.fromEntries(info.etapas.map((e) =>
+      e.kronos
+        ? [e.id, { ligada: Boolean(kronosLigado?.checked) }]
+        : [e.id, { conector_id: selects.get(e.id).value ? Number(selects.get(e.id).value) : null, ...(webs.has(e.id) ? { web: webs.get(e.id).checked } : {}) }])),
   });
 
   const salvar = async () => {
@@ -76,6 +91,7 @@ export async function paginaAgente({ recarregar, aoSair }) {
   };
   const montar = () => {
     for (const [id, sel] of selects) sel.value = info.sugestao[id] ?? '';
+    if (kronosLigado && info.kronos.ok) kronosLigado.checked = true;
     for (const sel of selects.values()) {
       sel.classList.add('piscou');
       setTimeout(() => sel.classList.remove('piscou'), 900);
@@ -158,6 +174,6 @@ export async function paginaAgente({ recarregar, aoSair }) {
         h('div', { class: 'cartao' }, h('h2', {}, icone('testar'), 'Testar com uma ordem de mentira'), h('p', { class: 'suave pequeno-texto' }, 'Nenhuma ordem sai. Usa as IAs de verdade (gasta créditos).'), formTeste),
         historico.length ? h('div', { class: 'cartao' }, h('h2', {}, icone('relogio'), 'Passadas anteriores'), lista) : null),
       area),
-    h('p', { class: 'rodape-pagina suave' }, icone('escudo'), 'Pesquisa, sentimento, técnica e risco rodam ao mesmo tempo; a decisão vem depois. Montar automático só sugere: confira e salve.'),
+    h('p', { class: 'rodape-pagina suave' }, icone('escudo'), 'Pesquisa, sentimento, previsão, técnica e risco rodam ao mesmo tempo; a decisão vem depois. Montar automático só sugere: confira e salve.'),
   ];
 }

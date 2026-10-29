@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { afinidade, lerEtapa, montarAutomatico, relatorios, type ConectorResumido } from '../src/agente/etapas.js';
+import { afinidade, etapaDaPrevisao, lerEtapa, montarAutomatico, relatorios, type ConectorResumido } from '../src/agente/etapas.js';
 
 const conector = (id: number, provedor: 'anthropic' | 'openai', modelo: string, url_base: string | null = null): ConectorResumido => ({ id, provedor, modelo, url_base, ativo: true });
 
@@ -42,5 +42,20 @@ describe('montar automático', () => {
   });
   it('a decisão prefere o Claude Opus', () => {
     expect(afinidade(opus, 'decisao')).toBeGreaterThan(afinidade(deepseek, 'decisao'));
+  });
+});
+
+describe('previsão do Kronos como etapa', () => {
+  const p = (chance: number) => ({ retorno_mediano_pct: 1.2, faixa_10_a_90_pct: [-3, 4] as [number, number], chance_de_terminar_acima: chance, horizonte_dias: 5 });
+  it('compra: a favor com 60% ou mais de chance de alta, contra com 40% ou menos', () => {
+    expect(etapaDaPrevisao(p(0.7), 'compra')).toMatchObject({ vies: 'a_favor', nota: 70 });
+    expect(etapaDaPrevisao(p(0.5), 'compra')).toMatchObject({ vies: 'neutro', nota: 50 });
+    expect(etapaDaPrevisao(p(0.3), 'compra')).toMatchObject({ vies: 'contra', nota: 30 });
+  });
+  it('venda: o contrário', () => {
+    expect(etapaDaPrevisao(p(0.3), 'venda')).toMatchObject({ vies: 'a_favor', nota: 70 });
+  });
+  it('resumo com mediana, faixa e chance', () => {
+    expect(etapaDaPrevisao(p(0.62), 'compra').resumo).toBe('Em 5 dias o Kronos projeta +1.20% (mediana), com faixa de -3.00% a +4.00% e 62% de chance de terminar acima de hoje.');
   });
 });

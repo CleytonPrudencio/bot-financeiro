@@ -5,7 +5,7 @@ import { transacao, umOuNada } from './db.js';
 import { logger } from './logger.js';
 import { avaliar, conferirAnalise, consultaIa, decidirComIa, type AnaliseRecente, type EstadoRisco, type PoliticaIa } from './risco.js';
 import { consultarIas, type ConectorIa, type PedidoParecer, type RespostaIa } from './ia/index.js';
-import { dadosParaAgente, gravarExecucao, lerConfig, rodarAgente, type ResultadoAgente } from './agente/index.js';
+import { dadosParaAgente, gravarExecucao, lerConfig, previsaoLigada, rodarAgente, type ResultadoAgente } from './agente/index.js';
 import { lerSinal, type Sinal } from './sinal.js';
 import { CorretoraCcxt, cotacaoPublica } from './brokers/ccxt.js';
 import { simularCompra, simularVenda } from './brokers/simulacao.js';
@@ -250,7 +250,7 @@ export async function processarSinal(token: string, corpo: unknown, ip: string |
       if (est.ia_tipo === 'agente') {
         const todos = (await c.query<ConectorIa>('select * from conectores_ia where ativo')).rows;
         const config = await lerConfig((sql, p) => c.query(sql, p).then((r) => r.rows));
-        execucaoAgente = await rodarAgente({ pedido, dados: await dadosParaAgente(conta.exchange, est.simbolo), config, conectores: todos });
+        execucaoAgente = await rodarAgente({ pedido, dados: await dadosParaAgente(conta.exchange, est.simbolo, previsaoLigada(config)), config, conectores: todos });
         pareceres = [execucaoAgente.final];
       } else {
         pareceres = await consultarIas(await conectoresDa(c, est), pedido);

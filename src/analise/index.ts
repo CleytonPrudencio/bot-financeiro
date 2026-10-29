@@ -4,6 +4,7 @@ import { velasDiarias } from '../brokers/ccxt.js';
 import { chamarIa, mensagemDeErro, type ConectorIa } from '../ia/index.js';
 import { AGENTES, ESQUEMA_AGENTE, sistemaDoAgente, type Agente } from './agentes.js';
 import { resumoTecnico } from './indicadores.js';
+import { kronosLigado, preverKronos, resumoParaIa } from '../previsao/kronos.js';
 import { conceito, lerAgente, notaComposta, type ResultadoAgente } from './nota.js';
 
 // Análise completa: busca as velas na exchange, calcula os indicadores e manda os 5 agentes ao
@@ -20,8 +21,11 @@ export interface PedidoAnalise {
   usuarioId: number | undefined;
 }
 
-/** Indicadores das velas diárias da exchange (null sem exchange). Lança se a exchange falhar. */
-export async function dadosDeMercado(exchange: string | null, simbolo: string) {
+/**
+ * Indicadores das velas diárias da exchange (null sem exchange) e, se o Kronos estiver no ar, a
+ * previsão dele para os próximos 5 dias. Lança se a exchange falhar; o Kronos falhando só vira aviso.
+ */
+export async function dadosDeMercado(exchange: string | null, simbolo: string, opcoes: { previsao?: boolean } = {}) {
   if (!exchange) return null;
   const velas = await velasDiarias(exchange, simbolo);
   if (velas.length < 30) throw new Error(`a ${exchange} devolveu só ${velas.length} velas de ${simbolo}`);
@@ -33,7 +37,17 @@ export async function dadosDeMercado(exchange: string | null, simbolo: string) {
       .then((v) => v.map((c) => c.fecha))
       .catch(() => undefined);
   }
-  return { exchange, simbolo, ...resumoTecnico(velas, referencia) };
+  const dados: Record<string, unknown> = { exchange, simbolo, ...resumoTecnico(velas, referencia) };
+  if (opcoes.previsao !== false && kronosLigado()) {
+    try {
+      const p = await preverKronos(velas);
+      const r = (v: number) => Number(v.toPrecision(6));
+      dados.previsao_kronos = { ...resumoParaIa(p), datas: p.datas, mediana: p.mediana.map(r), p10: p.p10.map(r), p90: p.p90.map(r), ms: p.ms };
+    } catch (e) {
+      dados.previsao_kronos = { erro: (e as Error).message.slice(0, 200) };
+    }
+  }
+  return dados;
 }
 
 function textoDoAgente(a: Agente, simbolo: string, dados: unknown, motivoSemDados: string | null): string {

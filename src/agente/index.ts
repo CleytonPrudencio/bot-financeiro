@@ -4,15 +4,19 @@ import { logger } from '../logger.js';
 import { dadosDeMercado } from '../analise/index.js';
 import { chamarIa, mensagemDeErro, type ConectorIa, type PedidoParecer, type RespostaIa } from '../ia/index.js';
 import { ESQUEMA_PARECER, lerParecer } from '../ia/prompt.js';
-import { ESQUEMA_ETAPA, ETAPAS, ETAPAS_DE_APOIO, lerEtapa, relatorios, sistemaDaEtapa, SISTEMA_DECISAO, type IdEtapa, type ResultadoEtapa } from './etapas.js';
+import { ESQUEMA_ETAPA, ETAPAS, ETAPAS_DE_APOIO, etapaDaPrevisao, lerEtapa, relatorios, sistemaDaEtapa, SISTEMA_DECISAO, type IdEtapa, type ResultadoEtapa } from './etapas.js';
 
 // Agente em etapas: pesquisa, sentimento, técnica e risco rodam ao mesmo tempo, cada uma na IA
 // escolhida para ela; depois a IA da decisão lê os relatórios e aprova ou veta. O resultado entra
 // no motor como UM voto (decidirComIa), então vale a mesma regra: só barra.
 
 export interface ConfigAgente {
-  etapas: Partial<Record<IdEtapa, { conector_id: number | null; web?: boolean }>>;
+  /** conector_id nas etapas de IA; `ligada` na previsão do Kronos */
+  etapas: Partial<Record<IdEtapa, { conector_id?: number | null; web?: boolean; ligada?: boolean }>>;
 }
+
+/** A previsão do Kronos entra na esteira? */
+export const previsaoLigada = (config: ConfigAgente) => Boolean(config.etapas.previsao?.ligada);
 
 export type SaidaEtapa =
   | { ok: true; conector: string; modelo: string; ms: number; web: boolean; resultado: ResultadoEtapa }
@@ -72,6 +76,18 @@ export async function rodarAgente({ pedido, dados, config, conectores, aoAtualiz
   const etapas: ResultadoAgente['etapas'] = {};
   await Promise.all(
     ETAPAS_DE_APOIO.map(async (e) => {
+      if (e.kronos) {
+        if (!previsaoLigada(config)) return;
+        const p = (dados as { previsao_kronos?: { erro?: string; modelo?: string; ms?: number } } | null)?.previsao_kronos;
+        const saida: SaidaEtapa = !p
+          ? { ok: false, conector: 'Kronos', modelo: '-', ms: 0, erro: 'sem previsão (Kronos fora do ar ou ativo sem velas)' }
+          : p.erro
+            ? { ok: false, conector: 'Kronos', modelo: '-', ms: 0, erro: p.erro }
+            : { ok: true, conector: 'Kronos', modelo: p.modelo ?? 'Kronos', ms: p.ms ?? 0, web: false, resultado: etapaDaPrevisao(p as Parameters<typeof etapaDaPrevisao>[0], pedido.lado) };
+        etapas[e.id] = saida;
+        await aoAtualizar?.(e.id, saida);
+        return;
+      }
       const c = conectorDa(e.id);
       if (!c) return;
       const web = Boolean(e.usaWeb && config.etapas[e.id]?.web && c.provedor === 'anthropic');
@@ -111,11 +127,11 @@ export async function rodarAgente({ pedido, dados, config, conectores, aoAtualiz
   return { etapas, final, ms: Date.now() - inicio };
 }
 
-/** Dados de mercado para o agente; sem exchange ou com erro, segue sem eles. */
-export async function dadosParaAgente(exchange: string | null, simbolo: string): Promise<unknown> {
+/** Dados de mercado para o agente (com a previsão do Kronos, se a etapa estiver ligada); sem exchange ou com erro, segue sem eles. */
+export async function dadosParaAgente(exchange: string | null, simbolo: string, previsao = false): Promise<unknown> {
   if (!exchange || !simbolo.includes('/')) return null;
   try {
-    return await dadosDeMercado(exchange, simbolo);
+    return await dadosDeMercado(exchange, simbolo, { previsao });
   } catch (e) {
     return { erro: (e as Error).message.slice(0, 200) };
   }
@@ -139,6 +155,7 @@ export async function iniciarTeste(pedido: PedidoParecer, exchange: string | nul
   const config = await lerConfig();
   const inicial = Object.fromEntries(
     ETAPAS.flatMap((e) => {
+      if (e.kronos) return previsaoLigada(config) ? [[e.id, { situacao: 'rodando', conector: 'Kronos', modelo: '' }]] : [];
       const c = conectores.find((x) => x.id === config.etapas[e.id]?.conector_id && x.ativo);
       return c ? [[e.id, { situacao: 'rodando', conector: c.nome, modelo: c.modelo }]] : [];
     }),
@@ -149,7 +166,7 @@ export async function iniciarTeste(pedido: PedidoParecer, exchange: string | nul
   );
   const id = linha!.id;
   (async () => {
-    const dados = await dadosParaAgente(exchange, pedido.simbolo);
+    const dados = await dadosParaAgente(exchange, pedido.simbolo, previsaoLigada(config));
     const r = await rodarAgente({
       pedido,
       dados,

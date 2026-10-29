@@ -5,7 +5,9 @@ import { ErroIa } from '../ia/tipos.js';
 // primeiras rodam ao mesmo tempo e a última, a decisão, lê o que todas disseram. Funções puras aqui:
 // definição, textos e leitura das respostas.
 
-export type IdEtapa = 'pesquisa' | 'sentimento' | 'tecnica' | 'risco' | 'decisao';
+export type IdEtapa = 'pesquisa' | 'sentimento' | 'previsao' | 'tecnica' | 'risco' | 'decisao';
+/** Etapas feitas por uma IA de linguagem (a previsão é do Kronos, não de um conector). */
+export type IdEtapaIa = Exclude<IdEtapa, 'previsao'>;
 
 export interface Etapa {
   id: IdEtapa;
@@ -15,6 +17,8 @@ export interface Etapa {
   recomendado: string;
   /** Pesquisa na web ajuda (só Claude tem a ferramenta; Perplexity já pesquisa sozinho). */
   usaWeb?: boolean;
+  /** Feita pelo Kronos (modelo de previsão de velas), não por uma IA de linguagem. */
+  kronos?: boolean;
 }
 
 export const ETAPAS: Etapa[] = [
@@ -31,6 +35,13 @@ export const ETAPAS: Etapa[] = [
     papel: 'analista de sentimento: mede o humor do mercado (redes sociais, X, fluxo, euforia ou medo, posições alavancadas)',
     recomendado: 'Grok (xAI), que lê o X em tempo real',
     usaWeb: true,
+  },
+  {
+    id: 'previsao',
+    nome: 'Previsão (Kronos)',
+    papel: 'modelo de previsão de velas: projeta os próximos 5 dias a partir do histórico, em vários caminhos, e mostra a chance de alta',
+    recomendado: 'Kronos, que roda na própria VM (sem custo de API)',
+    kronos: true,
   },
   {
     id: 'tecnica',
@@ -53,6 +64,29 @@ export const ETAPAS: Etapa[] = [
 ];
 
 export const ETAPAS_DE_APOIO = ETAPAS.filter((e) => e.id !== 'decisao');
+
+/**
+ * A previsão do Kronos como relatório de etapa. Para compra, a favor quando a chance de terminar
+ * acima é de 60% ou mais e contra com 40% ou menos; para venda, o contrário.
+ */
+export function etapaDaPrevisao(
+  p: { retorno_mediano_pct: number; faixa_10_a_90_pct: [number, number]; chance_de_terminar_acima: number; horizonte_dias: number },
+  lado: 'compra' | 'venda',
+): ResultadoEtapa {
+  const alta = p.chance_de_terminar_acima;
+  const favor = lado === 'compra' ? alta : 1 - alta;
+  const fmt = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(2)}%`;
+  return {
+    vies: favor >= 0.6 ? 'a_favor' : favor <= 0.4 ? 'contra' : 'neutro',
+    nota: Math.round(favor * 100),
+    resumo: `Em ${p.horizonte_dias} dias o Kronos projeta ${fmt(p.retorno_mediano_pct)} (mediana), com faixa de ${fmt(p.faixa_10_a_90_pct[0])} a ${fmt(p.faixa_10_a_90_pct[1])} e ${Math.round(alta * 100)}% de chance de terminar acima de hoje.`,
+    pontos: [
+      `chance de alta: ${Math.round(alta * 100)}%`,
+      `faixa de 10% a 90%: ${fmt(p.faixa_10_a_90_pct[0])} a ${fmt(p.faixa_10_a_90_pct[1])}`,
+      'previsão estatística das velas: não lê notícia nem fundamento',
+    ],
+  };
+}
 
 export const ESQUEMA_ETAPA = {
   type: 'object',
@@ -141,7 +175,7 @@ export interface ConectorResumido {
 }
 
 /** Pontua o quanto um conector combina com uma etapa, pelo provedor e pelo modelo. */
-export function afinidade(c: ConectorResumido, etapa: IdEtapa): number {
+export function afinidade(c: ConectorResumido, etapa: IdEtapaIa): number {
   const url = c.url_base ?? '';
   const m = c.modelo.toLowerCase();
   const claude = c.provedor === 'anthropic';
@@ -149,7 +183,7 @@ export function afinidade(c: ConectorResumido, etapa: IdEtapa): number {
   const grok = /x\.ai/.test(url) || m.includes('grok');
   const opus = claude && m.includes('opus');
   const sonnet = claude && m.includes('sonnet');
-  const tabela: Record<IdEtapa, number> = {
+  const tabela: Record<IdEtapaIa, number> = {
     pesquisa: perplexity ? 10 : opus ? 7 : sonnet ? 6 : claude ? 5 : grok ? 5 : 1,
     sentimento: grok ? 10 : perplexity ? 6 : claude ? 4 : 1,
     tecnica: m.includes('qwen3') || m.includes('qwen-max') ? 9 : opus ? 8 : sonnet ? 7 : m.includes('deepseek') ? 6 : claude ? 5 : m.includes('gpt') ? 5 : 2,
@@ -160,10 +194,11 @@ export function afinidade(c: ConectorResumido, etapa: IdEtapa): number {
 }
 
 /** Para cada etapa, o conector ativo que mais combina (empate: o de menor id). */
-export function montarAutomatico(conectores: ConectorResumido[]): Record<IdEtapa, number | null> {
+export function montarAutomatico(conectores: ConectorResumido[]): Record<IdEtapaIa, number | null> {
   const ativos = conectores.filter((c) => c.ativo);
-  const escolha = {} as Record<IdEtapa, number | null>;
+  const escolha = {} as Record<IdEtapaIa, number | null>;
   for (const e of ETAPAS) {
+    if (e.id === 'previsao') continue;
     let melhor: ConectorResumido | null = null;
     for (const c of ativos) if (!melhor || afinidade(c, e.id) > afinidade(melhor, e.id)) melhor = c;
     escolha[e.id] = melhor?.id ?? null;

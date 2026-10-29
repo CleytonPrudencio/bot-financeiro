@@ -24,6 +24,8 @@ services:
       BOT_LIVE_ENABLED: "${BOT_LIVE_ENABLED:-false}"
       BOT_PUBLIC_URL: "${BOT_PUBLIC_URL:-https://bot.77.42.120.142.sslip.io}"
       BOT_TRUST_PROXY: "1"
+      # previsão de preço (container bot-kronos, rede interna); fora do ar, o bot segue sem ela
+      KRONOS_URL: "http://bot-kronos:8000"
     mem_limit: 512m
     cpus: 1.0
     pids_limit: 256
@@ -31,6 +33,22 @@ services:
     security_opt: ["no-new-privileges:true"]
     # interna: fala com o banco · proxy: recebe o Caddy e sai para a internet (exchanges)
     networks: [interna, proxy]
+
+  # Previsão de preço com o Kronos (modelo de base para velas, licença MIT), só CPU. Só na rede
+  # interna: sem internet (os pesos vêm na imagem) e fora do alcance dos outros sistemas da VM.
+  bot-kronos:
+    build:
+      context: ./kronos
+    container_name: bot-kronos
+    restart: unless-stopped
+    environment:
+      KRONOS_THREADS: "2"
+    mem_limit: 1g
+    cpus: 2.0
+    pids_limit: 128
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [interna]
 
   bot-db:
     image: postgres:16-alpine

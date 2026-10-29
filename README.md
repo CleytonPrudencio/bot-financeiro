@@ -127,15 +127,31 @@ aprova ou veta.
 |---|---|---|
 | 1 · Pesquisa | notícias, fatos e eventos recentes | Perplexity (Sonar Pro) ou Claude com pesquisa na web |
 | 2 · Sentimento | humor do mercado, redes, X, alavancagem | Grok (xAI), que lê o X em tempo real |
-| 3 · Análise técnica | indicadores calculados das velas | Qwen3 Max (OpenRouter) ou Claude |
-| 4 · Risco | volatilidade, queda, tamanho da ordem, limites | DeepSeek ou Claude |
-| 5 · Decisão final | lê tudo e decide | Claude Opus 5.5 com esforço alto |
+| 3 · Previsão | projeta os próximos 5 dias a partir das velas | **Kronos**, que roda na própria VM (liga e desliga) |
+| 4 · Análise técnica | indicadores calculados das velas | Qwen3 Max (OpenRouter) ou Claude |
+| 5 · Risco | volatilidade, queda, tamanho da ordem, limites | DeepSeek ou Claude |
+| 6 · Decisão final | lê tudo e decide | Claude Opus 5.5 com esforço alto |
 
 **Montar automático** escolhe, entre as IAs cadastradas, a que mais combina com cada etapa (pelo
 provedor e pelo modelo); confira e salve. Na estratégia, "Como as IAs decidem" → **Agente em
 etapas**: o veredito da esteira vira um voto só, com a mesma política do conselho (só barra; etapa
 que falhou é dado que faltou; sem IA na decisão, a ordem não sai no modo obrigatório). Cada passada
 fica gravada e aparece no detalhe do sinal; dá para testar com uma ordem de mentira na própria página.
+
+## Previsão com o Kronos
+
+[Kronos](https://github.com/shiyu-coder/Kronos) (licença MIT) é um modelo de base para velas
+(OHLCV), treinado em mais de 12 bilhões de velas de 45 bolsas. Roda no container `bot-kronos`, só
+CPU, na rede interna do bot (sem internet: os pesos do Kronos-small vêm na imagem, baixados na
+montagem). O bot manda as últimas 400 velas diárias e recebe 16 caminhos simulados para os próximos
+5 dias: a mediana, a faixa de 10% a 90% e a chance de terminar acima de hoje.
+
+- Entra nos dados da **mesa de análise** (os 5 agentes leem a previsão; a página mostra o leque).
+- É uma etapa do **agente em etapas** (para compra, a favor com chance de alta ≥ 60%, contra com ≤ 40%).
+- Nunca decide sozinho, e o Kronos fora do ar não para o bot: a previsão só fica de fora.
+- O código do modelo está em `kronos/model/`, copiado sem mudanças do repositório oficial (aviso de
+  licença em `kronos/LICENCA-Kronos.txt`); o serviço HTTP é `kronos/servico.py`. O CI monta a
+  imagem e faz uma previsão de verdade antes de cada deploy.
 
 ## Mesa de análise (5 agentes)
 
@@ -233,6 +249,7 @@ src/
   ia/                  conectores de IA: anthropic.ts (SDK oficial), compativel.ts (formato OpenAI), prompt.ts
   analise/             mesa de 5 agentes: agentes.ts, indicadores.ts, nota.ts, index.ts
   agente/              agente em etapas: etapas.ts (etapas, textos, montar automático), index.ts (esteira)
+  previsao/kronos.ts   cliente do serviço do Kronos
   sinal.ts             leitura e normalização do sinal
   brokers/             ccxt.ts (exchanges reais e cotação pública), simulacao.ts
   routes/api.ts        API do painel (login, contas, estratégias, sinais, ordens, auditoria)
@@ -241,6 +258,7 @@ src/
   scripts/criar-admin.ts
 migrations/            SQL aplicado em ordem na subida
 public/                painel (HTML, CSS, JS sem build): app.js, js/base.js, js/paginas/*, escritorio/*
+kronos/                serviço de previsão (Python, container bot-kronos)
 deploy/                scripts da VM e bloco do Caddy
 tests/
 ```

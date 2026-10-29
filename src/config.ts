@@ -31,4 +31,6 @@ export const config = {
   // Atrás do Caddy o IP real vem no X-Forwarded-For. 1 = confia em um proxy.
   proxiesConfiaveis: inteiro('BOT_TRUST_PROXY', 1),
   fuso: 'America/Sao_Paulo',
+  // serviço de previsão do Kronos (container bot-kronos); sem ele, o bot segue sem previsão
+  kronosUrl: process.env.KRONOS_URL || null,
 } as const;

@@ -39,6 +39,8 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
   let urlIa = '';
   let respostaIa = '{"decisao":"vetar","confianca":0.9,"motivo":"teste"}';
   const pedidosIa: { auth?: string; corpo: { messages: { content: string }[] } }[] = [];
+  let kronosFalso: Server;
+  let chamadasKronos = 0;
 
   const painel = async (metodo: string, caminho: string, corpo?: unknown) => {
     const r = await fetch(base + '/api' + caminho, {
@@ -62,6 +64,21 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     (await db.query<{ quantidade: number }>('select quantidade from saldos_simulados where moeda = $1', [moeda]))[0]?.quantidade ?? 0;
 
   beforeAll(async () => {
+    // Kronos falso: devolve sempre a mesma previsão
+    kronosFalso = createServer((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/saude') return void res.end('{"ok":true,"modelo":"falso"}');
+      req.resume();
+      req.on('end', () => {
+        chamadasKronos++;
+        res.end(JSON.stringify({
+          modelo: 'falso', horizonte: 5, caminhos: 16, ultimo: 100, datas: ['a', 'b', 'c', 'd', 'e'],
+          mediana: [101, 102, 103, 103, 104], p10: [99, 98, 97, 96, 95], p90: [103, 105, 107, 109, 111],
+          retorno_mediano_pct: 4, retorno_p10_pct: -5, retorno_p90_pct: 11, prob_alta: 0.72, ms: 5,
+        }));
+      });
+    }).listen(0);
+    process.env.KRONOS_URL = `http://127.0.0.1:${(kronosFalso.address() as AddressInfo).port}`;
     Object.assign(process.env, {
       DATABASE_URL: URL_BANCO,
       BOT_SESSION_SECRET: 'segredo-de-teste',
@@ -92,6 +109,7 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
   afterAll(async () => {
     servidor?.close();
     iaFalsa?.close();
+    kronosFalso?.close();
     await db?.pool.end();
   });
 
@@ -271,6 +289,7 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     expect(a).toMatchObject({ situacao: 'pronta', simbolo: 'BTC/USDT', nota: 70, conceito: 'A', sinal: 'Compra' });
     expect(Object.keys(a.agentes as object).sort()).toEqual(['fundamental', 'risco', 'sentimento', 'tecnico', 'tese']);
     expect((a.dados as { media_200d: number }).media_200d).toBeGreaterThan(0);
+    expect((a.dados as { previsao_kronos: { chance_de_terminar_acima: number } }).previsao_kronos.chance_de_terminar_acima).toBe(0.72);
     // os agentes recebem os indicadores calculados das velas
     expect(pedidosIa.at(-1)!.corpo.messages[1]!.content).toContain('ifr_14');
 
@@ -298,7 +317,7 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     // duas etapas ligadas + a decisão
     expect(pedidosIa.length - antes).toBe(3);
     expect(pedidosIa.at(-1)!.corpo.messages[1]!.content).toContain('## Análise técnica');
-    const [exec] = await db.query<{ origem: string; decisao: string; etapas: Record<string, unknown>; sinal_id: number }>('select * from agente_execucoes');
+    const [exec] = await db.query<{ origem: string; decisao: string; etapas: Record<string, unknown>; sinal_id: number }>('select * from agente_execucoes order by id');
     expect(exec).toMatchObject({ origem: 'sinal', decisao: 'vetar' });
     expect(Object.keys(exec!.etapas).sort()).toEqual(['pesquisa', 'tecnica']);
     const [s1] = (await painel('GET', '/sinais?limite=1')).corpo as unknown as { agente: { decisao: string } }[];
@@ -306,6 +325,18 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
 
     respostaIa = '{"vies":"a_favor","nota":80,"resumo":"ok","pontos":[],"decisao":"aprovar","confianca":0.85,"motivo":"tudo a favor"}';
     expect((await sinal({ acao: 'comprar', id: 'ag2' })).corpo).toMatchObject({ situacao: 'executado' });
+  });
+
+  it('previsão do Kronos entra como etapa e a decisão lê o relatório dela', async () => {
+    const [c] = await db.query<{ id: number }>('select id from conectores_ia');
+    await painel('PUT', '/agente', { etapas: { previsao: { ligada: true }, decisao: { conector_id: c!.id } } });
+    expect((await painel('GET', '/agente')).corpo).toMatchObject({ kronos: { ok: true, modelo: 'falso' } });
+    const antes = chamadasKronos;
+    expect((await sinal({ acao: 'comprar', id: 'kr1' })).corpo).toMatchObject({ situacao: 'executado' });
+    expect(chamadasKronos).toBe(antes + 1);
+    expect(pedidosIa.at(-1)!.corpo.messages[1]!.content).toContain('## Previsão (Kronos) (Kronos): a_favor, nota 72/100');
+    const [ultima] = await db.query<{ etapas: Record<string, { ok: boolean }> }>('select etapas from agente_execucoes order by id desc limit 1');
+    expect(Object.keys(ultima!.etapas)).toEqual(['previsao']);
   });
 
   it('teste do agente pelo painel roda em segundo plano', async () => {
@@ -317,7 +348,7 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
       e = (await painel('GET', `/agente/execucoes/${t.corpo.id}`)).corpo;
     }
     expect(e).toMatchObject({ situacao: 'pronta', origem: 'teste', decisao: 'aprovar', simbolo: 'BTC/USDT' });
-    expect(Object.keys(e.etapas as object).sort()).toEqual(['decisao', 'pesquisa', 'tecnica']);
+    expect(Object.keys(e.etapas as object).sort()).toEqual(['decisao', 'previsao']);
   });
 
   it('auditoria registrou as ações do painel', async () => {

@@ -11,6 +11,7 @@ import { moedas } from '../brokers/tipos.js';
 import { iniciarAnalise } from '../analise/index.js';
 import { agentePronto, iniciarTeste, lerConfig, salvarConfig, type ConfigAgente } from '../agente/index.js';
 import { ETAPAS, montarAutomatico } from '../agente/etapas.js';
+import { saudeKronos } from '../previsao/kronos.js';
 import { AGENTES } from '../analise/agentes.js';
 import {
   consultarIas, MODELOS_CLAUDE, pedirParecer, perguntarIas, PEDIDO_DE_TESTE, PRESETS_COMPATIVEIS,
@@ -695,17 +696,22 @@ api.get('/analises/:id', async (req, res) => {
 
 const idsEtapas = ETAPAS.map((e) => e.id) as [string, ...string[]];
 const esquemaConfigAgente = z.object({
-  etapas: z.partialRecord(z.enum(idsEtapas), z.object({ conector_id: z.number().int().positive().nullable(), web: z.boolean().optional() })),
+  etapas: z.partialRecord(z.enum(idsEtapas), z.object({ conector_id: z.number().int().positive().nullable().optional(), web: z.boolean().optional(), ligada: z.boolean().optional() })),
 });
 
 api.get('/agente', async (_req, res) => {
   const [config, conectores] = await Promise.all([lerConfig(), query<ConectorIa>('select * from conectores_ia order by id')]);
   res.json({
-    etapas: ETAPAS.map(({ id, nome, papel, recomendado, usaWeb }) => ({ id, nome, papel, recomendado, usa_web: Boolean(usaWeb) })),
+    etapas: ETAPAS.map(({ id, nome, papel, recomendado, usaWeb, kronos }) => ({ id, nome, papel, recomendado, usa_web: Boolean(usaWeb), kronos: Boolean(kronos) })),
+    kronos: await saudeKronos(),
     config,
     pronto: agentePronto(config, conectores),
     sugestao: montarAutomatico(conectores),
   });
+});
+
+api.get('/kronos', async (_req, res) => {
+  res.json(await saudeKronos());
 });
 
 api.put('/agente', async (req, res) => {
@@ -716,7 +722,7 @@ api.put('/agente', async (req, res) => {
     if (achados.length !== new Set(ids).size) throw new ErroPedido('algum conector escolhido não existe');
   }
   await salvarConfig(d);
-  await evento(req.usuarioId, 'agente_configurado', { etapas: Object.fromEntries(Object.entries(d.etapas).map(([k, v]) => [k, v?.conector_id ?? null])) });
+  await evento(req.usuarioId, 'agente_configurado', { etapas: Object.fromEntries(Object.entries(d.etapas).map(([k, v]) => [k, k === 'previsao' ? Boolean(v?.ligada) : v?.conector_id ?? null])) });
   res.json({ ok: true });
 });
 

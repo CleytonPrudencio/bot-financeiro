@@ -691,7 +691,8 @@ input[type='checkbox'] { width: auto; }
 /* ------------------------------------------------------------------ agente em etapas */
 
 .esteira { display: grid; gap: 10px; }
-.esteira-etapas { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.esteira-etapas { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+.area-resultado .esteira-etapas { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .etapa { display: grid; gap: 10px; align-content: start; border-top: 3px solid color-mix(in srgb, var(--ia) 60%, transparent); }
 .etapa-decisao { border-top-color: var(--ouro); background: radial-gradient(600px 160px at 50% 0%, color-mix(in srgb, var(--ouro) 10%, transparent), transparent 70%), var(--painel); }
 .etapa-topo { display: flex; align-items: center; gap: 10px; }
@@ -719,7 +720,14 @@ select.piscou { animation: piscar-ia 0.9s ease-out; }
 .resultado-agente { display: grid; gap: 4px; }
 .parecer-neutro { border-left-color: var(--fraco); }
 .form-linha { display: grid; gap: 12px; }
+@media (max-width: 1400px) { .esteira-etapas { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 1180px) { .esteira-etapas { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.leque { display: grid; gap: 8px; }
+.leque > svg { width: 100%; height: auto; display: block; }
+.leque-faixa { fill: color-mix(in srgb, var(--ia) 22%, transparent); }
+.leque-mediana { fill: none; stroke: var(--ia); stroke-width: 2.2; stroke-linecap: round; }
+.leque-historico { fill: none; stroke: var(--suave); stroke-width: 1.6; }
+.leque-hoje { stroke: var(--borda-forte); stroke-dasharray: 3 3; }
 @media (max-width: 640px) { .esteira-etapas { grid-template-columns: 1fr; } }
 
 /* ------------------------------------------------------------------ login */

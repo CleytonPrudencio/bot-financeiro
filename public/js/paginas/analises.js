@@ -78,8 +78,44 @@ function painelDados(d) {
     ['Queda desde o topo', `${fmt(d.queda_desde_topo_pct, 1)}%`],
     ['Força vs BTC 30d', d.forca_relativa_vs_btc_30d_pct === null ? '—' : `${fmt(d.forca_relativa_vs_btc_30d_pct)} p.p.`],
   ];
-  return h('div', { class: 'cartao' }, h('div', { class: 'cartao-topo' }, h('div', {}, h('h2', {}, icone('painel'), 'Dados que os agentes receberam'), h('p', { class: 'suave' }, `${d.dias_de_historico} velas diárias da ${d.exchange}, calculados aqui (não pela IA)`))),
-    h('div', { class: 'dados-grade' }, itens.map(([r, v]) => h('div', {}, h('span', { class: 'suave' }, r), h('strong', { class: 'mono' }, v)))));
+  return [previsaoKronos(d), h('div', { class: 'cartao' }, h('div', { class: 'cartao-topo' }, h('div', {}, h('h2', {}, icone('painel'), 'Dados que os agentes receberam'), h('p', { class: 'suave' }, `${d.dias_de_historico} velas diárias da ${d.exchange}, calculados aqui (não pela IA)`))),
+    h('div', { class: 'dados-grade' }, itens.map(([r, v]) => h('div', {}, h('span', { class: 'suave' }, r), h('strong', { class: 'mono' }, v)))))];
+}
+
+/** Leque da previsão do Kronos: últimas velas, mediana dos caminhos e a faixa de 10% a 90%. */
+function previsaoKronos(d) {
+  const k = d.previsao_kronos;
+  if (!k) return null;
+  if (k.erro) return h('div', { class: 'destaque' }, icone('cotacao'), h('p', {}, `Previsão do Kronos indisponível: ${k.erro}.`));
+  const w = 600;
+  const hh = 180;
+  const hist = (d.ultimas_5_velas ?? []).map((v) => v.fecha);
+  const todos = [...hist, ...k.p10, ...k.p90];
+  const min = Math.min(...todos);
+  const max = Math.max(...todos);
+  const n = hist.length + k.mediana.length;
+  const x = (i) => 20 + (i / Math.max(n - 1, 1)) * (w - 40);
+  const y = (v) => hh - 18 - ((v - min) / (max - min || 1)) * (hh - 36);
+  const base = hist.length - 1;
+  const ponto = (i, v) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`;
+  const hoje = hist[hist.length - 1] ?? k.mediana[0];
+  const faixa = [ponto(base, hoje), ...k.p90.map((v, i) => ponto(base + 1 + i, v)), ...k.p10.map((v, i) => ponto(base + 1 + i, v)).reverse()].join(' ');
+  const mediana = [ponto(base, hoje), ...k.mediana.map((v, i) => ponto(base + 1 + i, v))].join(' ');
+  const fmt = (v) => `${v >= 0 ? '+' : ''}${fmt2(v)}%`;
+  const fmt2 = (v) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const chance = Math.round(k.chance_de_terminar_acima * 100);
+  return h('div', { class: 'cartao leque' },
+    h('div', { class: 'cartao-topo' }, h('div', {}, h('h2', {}, icone('cotacao'), `Previsão do Kronos · próximos ${k.horizonte_dias} dias`), h('p', { class: 'suave' }, `${k.caminhos_simulados} caminhos simulados pelo modelo ${String(k.modelo).split('/').pop()} · ${k.observacao}`)),
+      selo(`${chance}% de chance de alta`, chance >= 60 ? 'ok' : chance <= 40 ? 'perigo' : 'neutro')),
+    s('svg', { viewBox: `0 0 ${w} ${hh}`, role: 'img', 'aria-label': `Mediana ${fmt(k.retorno_mediano_pct)}, faixa de ${fmt(k.faixa_10_a_90_pct[0])} a ${fmt(k.faixa_10_a_90_pct[1])}` },
+      s('line', { class: 'leque-hoje', x1: x(base), x2: x(base), y1: 8, y2: hh - 10 }),
+      s('polygon', { class: 'leque-faixa area-anima', points: faixa }),
+      hist.length > 1 ? s('polyline', { class: 'leque-historico', points: hist.map((v, i) => ponto(i, v)).join(' ') }) : null,
+      s('polyline', { class: 'leque-mediana traco-anima', points: mediana, pathLength: 1 })),
+    h('div', { class: 'dados-grade' },
+      h('div', {}, h('span', { class: 'suave' }, 'Mediana'), h('strong', { class: 'mono' }, fmt(k.retorno_mediano_pct))),
+      h('div', {}, h('span', { class: 'suave' }, 'Faixa 10%–90%'), h('strong', { class: 'mono' }, `${fmt(k.faixa_10_a_90_pct[0])} a ${fmt(k.faixa_10_a_90_pct[1])}`)),
+      h('div', {}, h('span', { class: 'suave' }, 'Chance de alta'), h('strong', { class: 'mono' }, `${chance}%`))));
 }
 
 function resultado(a, agentes) {
@@ -97,7 +133,7 @@ function resultado(a, agentes) {
         h('p', { class: 'suave pequeno-texto' }, 'Nota = técnico 25% + fundamental 25% + sentimento 20% + risco 15% + tese 15%. Pesquisa e educação, não é recomendação de investimento.'))),
     h('div', { class: 'grade-agentes' }, agentes.map((d) => cartaoAgente(d, a.agentes?.[d.id]))),
     pronta ? tabelaNiveis(a) : null,
-    painelDados(a.dados),
+    ...[].concat(painelDados(a.dados) ?? []),
   ];
 }
 
