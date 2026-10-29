@@ -10,8 +10,22 @@ function tabelaSimples(colunas, linhas, textoVazio) {
     h('tbody', {}, linhas.map((l) => h('tr', {}, colunas.map((c) => h('td', {}, c[1](l))))))));
 }
 
+// As mais usadas no Brasil primeiro; o resto do CCXT vem depois, em ordem alfabética.
+const PRINCIPAIS = ['binance', 'mercado', 'bybit', 'okx', 'foxbit', 'bitso', 'bitget', 'kucoin', 'coinbase', 'kraken'];
+
+// Lista fechada (select), e não campo de texto: o Chrome preenchia o e-mail salvo no campo da
+// exchange por achar que o formulário com senha era de login.
+function seletorExchange(exchanges) {
+  const principais = PRINCIPAIS.filter((e) => exchanges.includes(e));
+  const resto = exchanges.filter((e) => !principais.includes(e));
+  return h('label', { class: 'campo' },
+    h('span', { class: 'campo-rotulo' }, 'Exchange'),
+    h('select', { name: 'exchange', required: true },
+      h('optgroup', { label: 'Principais' }, principais.map((e, i) => h('option', { value: e, selected: i === 0 }, e))),
+      h('optgroup', { label: 'Todas do CCXT' }, resto.map((e) => h('option', { value: e }, e)))));
+}
+
 function novaConta(exchanges, recarregar) {
-  const lista = h('datalist', { id: 'lista-exchanges' }, exchanges.map((e) => h('option', { value: e })));
   const form = h(
     'form',
     {
@@ -32,10 +46,9 @@ function novaConta(exchanges, recarregar) {
         }
       },
     },
-    lista,
     secao('Conta',
       campo('Nome', { name: 'nome', required: true, placeholder: 'Binance principal' }),
-      campo('Exchange (id do CCXT)', { name: 'exchange', list: 'lista-exchanges', required: true, placeholder: 'binance, mercado, bybit…' }),
+      seletorExchange(exchanges),
       escolha('Modo', 'modo', [['simulacao', 'Simulação'], ['real', 'Real']], 'simulacao'),
       campo('Taxa simulada (%)', { name: 'taxa_simulada_pct', type: 'number', step: '0.01', min: '0', value: '0.1' }),
     ),
@@ -46,8 +59,8 @@ function novaConta(exchanges, recarregar) {
     h('div', { class: 'destaque' }, icone('chave'), h('p', {}, 'Chaves de API: só para modo real ou para consultar saldo. Crie a chave na exchange sem permissão de saque e, se der, restrita ao IP 77.42.120.142. Elas ficam cifradas e nunca voltam para a tela.')),
     secao('Chaves de API',
       campo('API key', { name: 'api_key', autocomplete: 'off' }),
-      campo('API secret', { name: 'api_secret', type: 'password', autocomplete: 'off' }),
-      campo('Senha da API', { name: 'api_senha', type: 'password', autocomplete: 'off' }, 'se a exchange pede'),
+      campo('API secret', { name: 'api_secret', type: 'password', autocomplete: 'new-password' }),
+      campo('Senha da API', { name: 'api_senha', type: 'password', autocomplete: 'new-password' }, 'se a exchange pede'),
     ),
     interruptor('Usar testnet da exchange', { name: 'testnet' }, 'Binance, Bybit e OKX têm'),
     h('div', { class: 'acoes acoes-fim' }, h('button', { class: 'botao', type: 'submit' }, icone('ok'), h('span', {}, 'Criar conta'))),
@@ -118,8 +131,8 @@ function editarConta(c, recarregar) {
     ),
     secao('Trocar chaves',
       campo('Nova API key', { name: 'api_key', autocomplete: 'off', placeholder: c.tem_chave ? 'vazio = mantém a atual' : '' }),
-      campo('Novo API secret', { name: 'api_secret', type: 'password', autocomplete: 'off' }),
-      campo('Nova senha da API', { name: 'api_senha', type: 'password', autocomplete: 'off' }),
+      campo('Novo API secret', { name: 'api_secret', type: 'password', autocomplete: 'new-password' }),
+      campo('Nova senha da API', { name: 'api_senha', type: 'password', autocomplete: 'new-password' }),
     ),
     interruptor('Testnet', { name: 'testnet', checked: c.testnet }),
     interruptor('Apagar as chaves cadastradas', { name: 'apagar_chaves' }),
