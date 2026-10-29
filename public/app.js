@@ -1,7 +1,7 @@
 // Painel do Bot Financeiro: moldura (menu lateral, topo, faixa de cotações), rotas e transições.
 // As páginas ficam em js/paginas/; a base (DOM seguro, API, avisos) em js/base.js.
 
-import { $, api, botaoIcone, h, icone, marca, precoCompacto, quandoSessaoExpirar, reduzido, tentar } from './js/base.js';
+import { $, agora, api, FUSO, botaoIcone, h, icone, marca, precoCompacto, quandoSessaoExpirar, reduzido, tentar } from './js/base.js';
 import { telaLogin } from './js/login.js';
 import { paginaPainel } from './js/paginas/painel.js';
 import { paginaEstrategias } from './js/paginas/estrategias.js';
@@ -75,7 +75,7 @@ function montarMoldura() {
   );
   const relogio = h('span', { class: 'relogio mono' });
   const tick = () => {
-    relogio.textContent = new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    relogio.textContent = new Date(agora()).toLocaleTimeString('pt-BR', { timeZone: FUSO });
   };
   tick();
   clearInterval(relogioId);

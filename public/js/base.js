@@ -105,12 +105,29 @@ export function quandoSessaoExpirar(fn) {
   aoExpirar = fn;
 }
 
+// ------------------------------------------------------------------ hora oficial
+//
+// O relógio do computador de quem abre o painel pode estar errado. A hora que vale é a do servidor
+// (sincronizado), em Brasília: cada resposta da API traz o cabeçalho Date, e daí sai a diferença.
+
+export const FUSO = 'America/Sao_Paulo';
+let desvioRelogio = 0;
+
+function acertarRelogio(r) {
+  const servidor = Date.parse(r.headers.get('date') ?? '');
+  if (Number.isFinite(servidor)) desvioRelogio = servidor - Date.now();
+}
+
+/** Agora, pela hora do servidor (em ms). Use no lugar de Date.now() para mostrar hora. */
+export const agora = () => Date.now() + desvioRelogio;
+
 export async function api(metodo, caminho, corpo) {
   const r = await fetch('/api' + caminho, {
     method: metodo,
     headers: { 'content-type': 'application/json', 'x-painel': '1' },
     body: corpo === undefined ? undefined : JSON.stringify(corpo),
   });
+  acertarRelogio(r);
   const dados = await r.json().catch(() => ({}));
   if (r.status === 401 && caminho !== '/login') {
     aoExpirar();
@@ -267,11 +284,11 @@ export const fmt = (n, casas = 2) =>
   n === null || n === undefined ? '—' : Number(n).toLocaleString('pt-BR', { maximumFractionDigits: casas, minimumFractionDigits: Math.min(casas, 2) });
 export const qtd = (n) => fmt(n, 8);
 export const inteiro = (n) => fmt(n, 0);
-export const data = (s) => (s ? new Date(s).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'medium' }) : '—');
+export const data = (s) => (s ? new Date(s).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'medium', timeZone: FUSO }) : '—');
 export const pct = (x) => `${Math.round(Number(x) * 100)}%`;
 export function relativo(s) {
   if (!s) return '—';
-  const seg = Math.round((Date.now() - new Date(s).getTime()) / 1000);
+  const seg = Math.max(0, Math.round((agora() - new Date(s).getTime()) / 1000));
   if (seg < 60) return 'agora';
   if (seg < 3600) return `há ${Math.floor(seg / 60)} min`;
   if (seg < 86400) return `há ${Math.floor(seg / 3600)} h`;

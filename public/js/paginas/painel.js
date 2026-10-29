@@ -1,11 +1,11 @@
 import {
-  api, botaoSegurar, cabecalho, confirmar, contar, data, escalonar, fmt, h, icone, inteiro, precoCompacto,
-  qtd, relativo, selo, seloLado, seloModo, tentar, vazio,
+  agora, api, botaoSegurar, cabecalho, confirmar, contar, data, escalonar, fmt, h, icone, inteiro, precoCompacto,
+  FUSO, qtd, relativo, selo, seloLado, seloModo, tentar, vazio,
 } from '../base.js';
 import { graficoArea, linhaPequena, rosca } from '../graficos.js';
 
 function saudacao() {
-  const hora = Number(new Date().toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: 'America/Sao_Paulo' }));
+  const hora = Number(new Date(agora()).toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: FUSO }));
   return hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite';
 }
 
@@ -64,7 +64,7 @@ export async function paginaPainel({ recarregar, agendar }) {
   // atualiza sozinho enquanto a página está aberta
   agendar(() => recarregar({ suave: true }), 30_000);
 
-  const hoje = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Sao_Paulo' });
+  const hoje = new Date(agora()).toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: FUSO });
 
   return [
     cabecalho(`${saudacao()}!`, `Resumo da mesa · ${hoje}`,
@@ -123,6 +123,6 @@ export async function paginaPainel({ recarregar, agendar }) {
           : vazio('Nenhuma ordem ainda', 'As ordens aparecem aqui assim que um sinal for executado.', 'ordens'),
       ),
     ], 4)),
-    h('p', { class: 'rodape-pagina suave' }, icone('relogio'), `Atualizado ${data(new Date().toISOString())} · atualiza sozinho a cada 30 s`),
+    h('p', { class: 'rodape-pagina suave' }, icone('relogio'), `Atualizado ${data(agora())} · atualiza sozinho a cada 30 s`),
   ];
 }
