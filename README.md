@@ -134,12 +134,19 @@ educação, não recomendação de investimento.
 
 ## Escritório virtual
 
-Página **Escritório** do painel: um escritório animado (Canvas, sem biblioteca) onde cada robô
-analista cuida de um mercado na própria mesa (Ações/PETR4, Bitcoin, Ethereum, Dólar), com o gráfico
-ao vivo no monitor. Quando um analista vê um sinal (cruzamento das médias 9 e 26, stop ou alvo),
-leva a proposta até o **robô chefe**, que confere de novo (tendência longa, IFR, volatilidade,
-exposição total, sequência de perdas). Os dois juntam as notas (45% analista, 55% chefe, mínimo
-60%, veto do chefe reprova sozinho) e, se aprovado, o analista volta e executa.
+Página **Escritório** do painel: um escritório animado (Canvas, sem biblioteca) com **um robô
+analista para cada mercado** — cripto (Bitcoin, Ethereum, Solana, XRP), B3 (Petrobras, Vale,
+Ibovespa), câmbio (Dólar, Euro), commodities (Ouro, Petróleo Brent) e bolsa americana (S&P 500) —,
+cada um com o gráfico do seu ativo no monitor. Quando um analista vê um sinal (cruzamento das médias
+9 e 26, stop ou alvo), leva a proposta até o **robô chefe**, que confere de novo (tendência longa,
+IFR, volatilidade, exposição total, sequência de perdas). Os dois juntam as notas (45% analista, 55%
+chefe, mínimo 60%, veto do chefe reprova sozinho) e, se aprovado, o analista volta e executa.
+
+**Escala do dia**: na lateral você escolhe quem trabalha hoje (um a um ou pelos atalhos "Só cripto",
+"Só B3", "Brasil", "Lotar as mesas", "Todos de folga"). São 8 mesas; quem fica de folga vai andando
+para a **sala de descanso** (sofá e pufes, cochilando) ou para o **cantinho do café**. Quem é
+dispensado com posição aberta zera antes de sair; quem está em reunião sai quando voltar para a
+mesa. A escala fica salva no navegador.
 
 Por enquanto **o mercado é fictício** (`public/escritorio/mercado.js`) e nenhuma ordem sai dali.
 Ligando o **Conselho de IAs** na lateral, cada proposta também vai para as IAs de verdade

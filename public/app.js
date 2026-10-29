@@ -21,7 +21,7 @@ async function paginaEscritorio() {
   });
   limpar.push(() => escritorio.parar());
   return [
-    h('div', { class: 'cabecalho' }, h('div', {}, h('h1', {}, 'Escritório'), h('p', { class: 'suave' }, 'Cada robô cuida de um mercado na própria mesa. Sinal bom vai para o chefe, que confere de novo antes de executar.'))),
+    h('div', { class: 'cabecalho' }, h('div', {}, h('h1', {}, 'Escritório'), h('p', { class: 'suave' }, 'Um robô para cada mercado: cripto, B3, câmbio, commodities e bolsa americana. Você escolhe quem trabalha hoje; sinal bom vai para o chefe, que confere de novo antes de executar.'))),
     caixa,
   ];
 }

@@ -8,6 +8,43 @@ export const CHAO_Y = 230; // onde a parede encontra o chão
 const SALA = { esq: 470, dir: 810, fundo: CHAO_Y, frente: 305, portaEsq: 598, portaDir: 682 };
 export { SALA };
 
+/**
+ * As 8 mesas do escritório (duas fileiras, dos dois lados do corredor). `lado` é onde o robô fica
+ * em relação à mesa: o monitor vai do outro lado. Quem está escalado ocupa uma mesa livre.
+ */
+export const VAGAS_MESA = [
+  { x: 155, y: 480, lado: -1 },
+  { x: 400, y: 480, lado: 1 },
+  { x: 880, y: 480, lado: -1 },
+  { x: 1125, y: 480, lado: 1 },
+  { x: 165, y: 665, lado: -1 },
+  { x: 400, y: 665, lado: 1 },
+  { x: 880, y: 665, lado: -1 },
+  { x: 1115, y: 665, lado: 1 },
+];
+
+/** Faixa do chão entre a sala de descanso e as mesas: por onde se anda para descansar. */
+export const FAIXA_DESCANSO_Y = 352;
+
+/**
+ * Lugares na sala de descanso (fundo à esquerda: sofá e pufes) e no cantinho do café (fundo à
+ * direita). `caneca`: o robô fica com uma xícara na mão em vez de cochilar.
+ */
+export const VAGAS_DESCANSO = [
+  { x: 150, y: 296, lado: 'esq' },
+  { x: 215, y: 296, lado: 'esq' },
+  { x: 280, y: 296, lado: 'esq' },
+  { x: 345, y: 296, lado: 'esq' },
+  { x: 165, y: 336, lado: 'esq' },
+  { x: 245, y: 338, lado: 'esq' },
+  { x: 325, y: 338, lado: 'esq', caneca: true },
+  { x: 405, y: 334, lado: 'esq', caneca: true },
+  { x: 905, y: 300, lado: 'dir', caneca: true },
+  { x: 985, y: 302, lado: 'dir', caneca: true },
+  { x: 1065, y: 302, lado: 'dir' },
+  { x: 1140, y: 306, lado: 'dir', caneca: true },
+];
+
 /** Robôs um pouco maiores que o resto do cenário, para ler bem as expressões. */
 export const TAMANHO_ROBO = 1.32;
 
@@ -87,7 +124,7 @@ export function desenharCenarioFixo(ctx, rand) {
   ctx.closePath();
   ctx.fill();
   ctx.fillStyle = 'rgba(30, 55, 90, 0.4)';
-  ctx.fillRect(120, 498, 1040, 50);
+  ctx.fillRect(0, 498, LARGURA, 50);
 
   // sala do chefe: piso e parede do fundo
   ctx.fillStyle = '#4c5d78';
@@ -108,9 +145,136 @@ export function desenharCenarioFixo(ctx, rand) {
   ctx.textAlign = 'center';
   ctx.fillText('DIRETORIA DE RISCO', (SALA.esq + SALA.dir) / 2, 80);
 
+  desenharSalaDescanso(ctx);
+  desenharCantinhoCafe(ctx);
+
   // plantas
-  for (const [x, y, s] of [[70, 300, 1], [1210, 300, 1], [90, 690, 1.25], [1190, 690, 1.25]]) {
+  for (const [x, y, s] of [[1225, 318, 0.9], [640, 712, 0.8]]) {
     desenharPlanta(ctx, x, y, s, rand);
+  }
+}
+
+/** Fundo à esquerda: tapete, sofá, pufes, mesinha, máquina de café e a placa na parede. */
+function desenharSalaDescanso(ctx) {
+  // tapete
+  ctx.fillStyle = 'rgba(120, 72, 140, 0.35)';
+  ctx.beginPath();
+  ctx.ellipse(265, 312, 205, 44, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(230, 190, 255, 0.25)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(265, 312, 190, 38, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // placa na parede
+  ctx.fillStyle = 'rgba(11, 16, 32, 0.85)';
+  retanguloArredondado(ctx, 160, 150, 210, 22, 6);
+  ctx.fill();
+  ctx.fillStyle = '#d9b8ff';
+  ctx.font = '700 12px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('☾  SALA DE DESCANSO', 265, 165);
+
+  // sofá (encosto, assento e braços)
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(248, 300, 140, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#4b3a6b';
+  retanguloArredondado(ctx, 112, 240, 272, 40, 12);
+  ctx.fill();
+  ctx.fillStyle = '#5d4a85';
+  retanguloArredondado(ctx, 112, 272, 272, 24, 8);
+  ctx.fill();
+  ctx.fillStyle = '#3d2f58';
+  retanguloArredondado(ctx, 100, 252, 24, 46, 8);
+  ctx.fill();
+  retanguloArredondado(ctx, 372, 252, 24, 46, 8);
+  ctx.fill();
+  // almofadas
+  for (const x of [150, 215, 280, 345]) {
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    retanguloArredondado(ctx, x - 26, 274, 52, 10, 4);
+    ctx.fill();
+  }
+
+  // pufes
+  for (const [x, y, cor] of [[165, 336, '#d0704a'], [245, 338, '#3f8fb0'], [325, 338, '#c9a23a'], [405, 334, '#6a9e4f']]) {
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 2, 28, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = cor;
+    ctx.beginPath();
+    ctx.ellipse(x, y - 6, 26, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    ctx.ellipse(x - 6, y - 10, 12, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // máquina de café
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(52, 300, 26, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#2a2f3a';
+  retanguloArredondado(ctx, 32, 236, 40, 64, 6);
+  ctx.fill();
+  ctx.fillStyle = '#c0362c';
+  ctx.fillRect(36, 244, 32, 6);
+  ctx.fillStyle = '#0b1020';
+  ctx.fillRect(40, 258, 24, 20);
+  ctx.fillStyle = '#f2f2f2';
+  ctx.fillRect(47, 270, 10, 8);
+}
+
+/** Fundo à direita: balcão com cafeteira, xícaras e um quadro de avisos. */
+function desenharCantinhoCafe(ctx) {
+  ctx.fillStyle = 'rgba(11, 16, 32, 0.85)';
+  retanguloArredondado(ctx, 905, 150, 150, 22, 6);
+  ctx.fill();
+  ctx.fillStyle = '#ffd8a8';
+  ctx.font = '700 12px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('☕  CANTINHO DO CAFÉ', 980, 165);
+  // balcão
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(1020, 282, 170, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#c8b59a';
+  ctx.beginPath();
+  ctx.moveTo(860, 248);
+  ctx.lineTo(1180, 248);
+  ctx.lineTo(1190, 258);
+  ctx.lineTo(850, 258);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#7a5a3e';
+  ctx.fillRect(850, 258, 340, 24);
+  ctx.fillStyle = '#5e4430';
+  for (let x = 870; x < 1180; x += 56) ctx.fillRect(x, 262, 44, 16);
+  // cafeteira e xícaras
+  ctx.fillStyle = '#2a2f3a';
+  retanguloArredondado(ctx, 880, 222, 28, 28, 4);
+  ctx.fill();
+  ctx.fillStyle = '#ffb347';
+  ctx.fillRect(884, 228, 20, 4);
+  for (const x of [940, 962, 984, 1100, 1122]) {
+    ctx.fillStyle = '#f2f2f2';
+    retanguloArredondado(ctx, x, 240, 12, 10, 2);
+    ctx.fill();
+  }
+  // banquetas
+  for (const x of [905, 985, 1065, 1140]) {
+    ctx.fillStyle = '#3a3f4c';
+    ctx.fillRect(x - 2, 288, 4, 14);
+    ctx.beginPath();
+    ctx.ellipse(x, 288, 13, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
@@ -213,13 +377,13 @@ export function desenharQuadroCotacoes(ctx, ativos, t, hora, dia) {
   ctx.restore();
   // relógio de parede
   ctx.fillStyle = '#0b1020';
-  retanguloArredondado(ctx, 1110, 200, 120, 26, 5);
+  retanguloArredondado(ctx, 1090, 148, 120, 26, 5);
   ctx.fillStyle = 'rgba(11,16,32,0.85)';
   ctx.fill();
   ctx.fillStyle = '#9fe7ff';
   ctx.textAlign = 'center';
   ctx.font = '600 14px ui-monospace, Consolas, monospace';
-  ctx.fillText(`dia ${dia} · ${hora}`, 1170, 218);
+  ctx.fillText(`dia ${dia} · ${hora}`, 1150, 166);
 }
 
 /** Escurece e tinge de azul à noite, e acende as luminárias. */
@@ -246,8 +410,9 @@ export function desenharLuz(ctx, luz, t) {
 
 // ------------------------------------------------------------------ mesas e monitores
 
-export function desenharMesa(ctx, mesa, ativo, robo, t, aberto) {
-  const { x, y } = mesa;
+/** Mesa de uma vaga. Sem `ativo`, é uma mesa livre (monitor desligado). */
+export function desenharMesa(ctx, vaga, ativo, robo, t, aberto) {
+  const { x, y } = vaga;
   const s = escalaEm(y);
   const largura = 190 * s;
   const fundo = 46 * s;
@@ -273,17 +438,21 @@ export function desenharMesa(ctx, mesa, ativo, robo, t, aberto) {
   // painel da frente com a cor do ativo
   ctx.fillStyle = '#5b6476';
   ctx.fillRect(x - largura / 2 + 6 * s, y - altura + 10 * s, largura - 12 * s, altura - 10 * s);
-  ctx.fillStyle = ativo.cor;
+  ctx.fillStyle = ativo?.cor ?? '#8a93a6';
   ctx.fillRect(x - largura / 2 + 6 * s, y - altura + 10 * s, largura - 12 * s, 4 * s);
-  ctx.fillStyle = '#e9edf3';
+  ctx.fillStyle = ativo ? '#e9edf3' : '#aab3c2';
   ctx.font = `600 ${Math.round(13 * s)}px system-ui, sans-serif`;
   ctx.textAlign = 'center';
-  ctx.fillText(`${ativo.nome} · ${ativo.simbolo}`, x, y - 16 * s);
+  ctx.fillText(ativo ? `${ativo.nome} · ${ativo.simbolo}` : 'mesa livre', x, y - 16 * s);
 
   // monitor do lado oposto ao robô, virado para a câmera
-  const ladoMonitor = robo.casa.x > x ? -1 : 1;
+  const ladoMonitor = -vaga.lado;
   const mx = x + ladoMonitor * 38 * s;
   const my = y - altura - fundo * 0.45;
+  if (!ativo) {
+    desenharMonitorDesligado(ctx, mx, my, s);
+    return;
+  }
   desenharMonitor(ctx, mx, my, s, ativo, robo, t, aberto);
 
   // caneca com vapor
@@ -303,6 +472,21 @@ export function desenharMesa(ctx, mesa, ativo, robo, t, aberto) {
     ctx.quadraticCurveTo(cx + Math.sin(fase) * 5 * s, cy - 22 * s, cx + Math.sin(fase + 1) * 3 * s, cy - 30 * s);
     ctx.stroke();
   }
+}
+
+function desenharMonitorDesligado(ctx, x, y, s) {
+  const w = 104 * s;
+  const h = 66 * s;
+  ctx.fillStyle = '#2b3140';
+  ctx.fillRect(x - 5 * s, y - 6 * s, 10 * s, 12 * s);
+  ctx.fillRect(x - 20 * s, y + 4 * s, 40 * s, 4 * s);
+  ctx.fillStyle = '#1b1f29';
+  retanguloArredondado(ctx, x - w / 2, y - h - 4 * s, w, h, 4 * s);
+  ctx.fill();
+  ctx.fillStyle = '#05080f';
+  ctx.fillRect(x - w / 2 + 4 * s, y - h, w - 8 * s, h - 8 * s);
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  ctx.fillRect(x - w / 2 + 4 * s, y - h, (w - 8 * s) * 0.4, h - 8 * s);
 }
 
 function desenharMonitor(ctx, x, y, s, ativo, robo, t, aberto) {
@@ -525,7 +709,7 @@ export function desenharRobo(ctx, r, t, reduzido) {
     ctx.translate(lado * 19 * s, -40 * s);
     let ang = lado * 0.25 + balanco * lado;
     if (r.digitando) ang = lado * -0.9;
-    if (r.segurandoTablet && lado === 1) ang = -0.95;
+    if ((r.segurandoTablet || r.caneca) && lado === 1) ang = -0.95;
     if (r.gesticulando && lado === -1 && !reduzido) ang = -1.2 + Math.sin(t * 6) * 0.35;
     ctx.rotate(ang);
     ctx.fillStyle = r.corEscura;
@@ -543,6 +727,21 @@ export function desenharRobo(ctx, r, t, reduzido) {
       ctx.globalAlpha = 0.6 + 0.4 * Math.sin(t * 8);
       ctx.fillRect(-6 * s, 21 * s, 12 * s, 7 * s);
       ctx.globalAlpha = 1;
+    }
+    if (r.caneca && lado === 1) {
+      ctx.fillStyle = '#f2f2f2';
+      retanguloArredondado(ctx, -6 * s, 17 * s, 12 * s, 12 * s, 2 * s);
+      ctx.fill();
+      ctx.fillStyle = '#8a5a3a';
+      ctx.fillRect(-5 * s, 18 * s, 10 * s, 3 * s);
+      if (!reduzido) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+        ctx.lineWidth = 1.2 * s;
+        ctx.beginPath();
+        ctx.moveTo(0, 15 * s);
+        ctx.quadraticCurveTo(Math.sin(t * 2 + r.fase) * 4 * s, 9 * s, Math.sin(t * 2 + r.fase + 1) * 2 * s, 3 * s);
+        ctx.stroke();
+      }
     }
     ctx.restore();
   };

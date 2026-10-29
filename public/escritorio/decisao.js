@@ -5,7 +5,7 @@
 import { ifr, media, volatilidade } from './mercado.js';
 
 export const VALOR_POR_ORDEM = 1000; // em moeda de cotação de cada ativo
-export const MAX_POSICOES_ABERTAS = 3; // no escritório inteiro
+export const MAX_POSICOES_ABERTAS = 4; // no escritório inteiro
 export const NOTA_MINIMA = 0.6;
 
 export function novaCarteira() {

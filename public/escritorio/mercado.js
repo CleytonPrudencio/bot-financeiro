@@ -5,11 +5,28 @@
 // reais, troque `criarMercadoFicticio` por uma fonte com a mesma forma:
 //   { ativos, relogio, avancar(), aberto(ativo) }  e cada ativo com { historico, preco, ... }
 
+// `categoria` agrupa os robôs na escala do dia; `horario` em horas de Brasília (null = 24 h)
+export const CATEGORIAS = [
+  { id: 'cripto', nome: 'Cripto' },
+  { id: 'b3', nome: 'Bolsa B3' },
+  { id: 'cambio', nome: 'Câmbio' },
+  { id: 'commodities', nome: 'Commodities' },
+  { id: 'eua', nome: 'Bolsa EUA' },
+];
+
 export const ATIVOS = [
-  { id: 'acoes', nome: 'Ações', simbolo: 'PETR4', mercado: 'B3', preco: 38.5, volDia: 0.022, horario: [10, 17], moeda: 'R$', casas: 2, cor: '#3d8bfd' },
-  { id: 'btc', nome: 'Bitcoin', simbolo: 'BTC/USDT', mercado: 'Binance', preco: 68250, volDia: 0.035, horario: null, moeda: 'US$', casas: 0, cor: '#f7931a' },
-  { id: 'eth', nome: 'Ethereum', simbolo: 'ETH/USDT', mercado: 'Binance', preco: 3420, volDia: 0.045, horario: null, moeda: 'US$', casas: 1, cor: '#8c6cf0' },
-  { id: 'dolar', nome: 'Dólar', simbolo: 'USD/BRL', mercado: 'Câmbio', preco: 5.42, volDia: 0.009, horario: [9, 18], moeda: 'R$', casas: 4, cor: '#2fb67c' },
+  { id: 'btc', categoria: 'cripto', nome: 'Bitcoin', simbolo: 'BTC/USDT', mercado: 'Binance', preco: 68250, volDia: 0.035, horario: null, moeda: 'US$', casas: 0, cor: '#f7931a' },
+  { id: 'eth', categoria: 'cripto', nome: 'Ethereum', simbolo: 'ETH/USDT', mercado: 'Binance', preco: 3420, volDia: 0.045, horario: null, moeda: 'US$', casas: 1, cor: '#8c6cf0' },
+  { id: 'sol', categoria: 'cripto', nome: 'Solana', simbolo: 'SOL/USDT', mercado: 'Binance', preco: 172, volDia: 0.06, horario: null, moeda: 'US$', casas: 2, cor: '#19c59a' },
+  { id: 'xrp', categoria: 'cripto', nome: 'XRP', simbolo: 'XRP/USDT', mercado: 'Binance', preco: 0.62, volDia: 0.055, horario: null, moeda: 'US$', casas: 4, cor: '#5b7cfa' },
+  { id: 'acoes', categoria: 'b3', nome: 'Petrobras', simbolo: 'PETR4', mercado: 'B3', preco: 38.5, volDia: 0.022, horario: [10, 17], moeda: 'R$', casas: 2, cor: '#2e9e5b' },
+  { id: 'vale', categoria: 'b3', nome: 'Vale', simbolo: 'VALE3', mercado: 'B3', preco: 61.2, volDia: 0.02, horario: [10, 17], moeda: 'R$', casas: 2, cor: '#e0a526' },
+  { id: 'ibov', categoria: 'b3', nome: 'Ibovespa', simbolo: 'IBOV', mercado: 'B3', preco: 128400, volDia: 0.013, horario: [10, 17], moeda: 'pts', casas: 0, cor: '#3d8bfd' },
+  { id: 'dolar', categoria: 'cambio', nome: 'Dólar', simbolo: 'USD/BRL', mercado: 'Câmbio', preco: 5.42, volDia: 0.009, horario: [9, 18], moeda: 'R$', casas: 4, cor: '#2fb67c' },
+  { id: 'euro', categoria: 'cambio', nome: 'Euro', simbolo: 'EUR/USD', mercado: 'Forex', preco: 1.084, volDia: 0.006, horario: null, moeda: 'US$', casas: 4, cor: '#3b6fd8' },
+  { id: 'ouro', categoria: 'commodities', nome: 'Ouro', simbolo: 'XAU/USD', mercado: 'Comex', preco: 2385, volDia: 0.011, horario: [8, 23], moeda: 'US$', casas: 1, cor: '#e3b23c' },
+  { id: 'petroleo', categoria: 'commodities', nome: 'Petróleo', simbolo: 'BRENT', mercado: 'ICE', preco: 82.4, volDia: 0.02, horario: [8, 23], moeda: 'US$', casas: 2, cor: '#8a6a4a' },
+  { id: 'spx', categoria: 'eua', nome: 'S&P 500', simbolo: 'SPX', mercado: 'NYSE', preco: 5420, volDia: 0.01, horario: [10.5, 17], moeda: 'pts', casas: 0, cor: '#d64545' },
 ];
 
 const TAMANHO_HISTORICO = 260;
@@ -160,5 +177,6 @@ export function criarMercadoFicticio(semente = Date.now()) {
 }
 
 export function formatarPreco(ativo, valor) {
-  return `${ativo.moeda} ${valor.toLocaleString('pt-BR', { minimumFractionDigits: ativo.casas, maximumFractionDigits: ativo.casas })}`;
+  const numero = valor.toLocaleString('pt-BR', { minimumFractionDigits: ativo.casas, maximumFractionDigits: ativo.casas });
+  return ativo.moeda === 'pts' ? `${numero} pts` : `${ativo.moeda} ${numero}`;
 }

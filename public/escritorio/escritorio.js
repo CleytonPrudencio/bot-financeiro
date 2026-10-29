@@ -4,7 +4,7 @@
 //
 //   const escritorio = montarEscritorio(elemento); ...; escritorio.parar();
 
-import { criarMercadoFicticio, formatarPreco, ifr, aleatorio } from './mercado.js';
+import { CATEGORIAS, criarMercadoFicticio, formatarPreco, ifr, aleatorio } from './mercado.js';
 import { analisar, aplicarConselho, decidirJuntos, executar, novaCarteira, verificarChefe, VALOR_POR_ORDEM } from './decisao.js';
 import * as D from './desenho.js';
 
@@ -17,16 +17,48 @@ const FILA = [
   { x: 828, y: 412 },
 ];
 
+// cor do robô e símbolo no peito de cada mercado
 const VISUAL = {
-  acoes: { cor: '#4f8ff7', corEscura: '#2c5fb8', simbolo: 'B3', mesa: { x: 250, y: 430 }, lado: 1 },
-  btc: { cor: '#f7a23c', corEscura: '#c06d10', simbolo: '₿', mesa: { x: 1030, y: 430 }, lado: -1 },
-  eth: { cor: '#9a7cf2', corEscura: '#6545c9', simbolo: 'Ξ', mesa: { x: 330, y: 640 }, lado: 1 },
-  dolar: { cor: '#3cc48a', corEscura: '#1f8a5c', simbolo: '$', mesa: { x: 950, y: 640 }, lado: -1 },
+  btc: { cor: '#f7a23c', corEscura: '#c06d10', simbolo: '₿' },
+  eth: { cor: '#9a7cf2', corEscura: '#6545c9', simbolo: 'Ξ' },
+  sol: { cor: '#2fd3a8', corEscura: '#11906f', simbolo: 'S' },
+  xrp: { cor: '#6f8cff', corEscura: '#3f56c9', simbolo: 'X' },
+  acoes: { cor: '#3fb46c', corEscura: '#237a44', simbolo: 'P4' },
+  vale: { cor: '#f0b43a', corEscura: '#b07a10', simbolo: 'V3' },
+  ibov: { cor: '#4f8ff7', corEscura: '#2c5fb8', simbolo: 'B3' },
+  dolar: { cor: '#3cc48a', corEscura: '#1f8a5c', simbolo: '$' },
+  euro: { cor: '#4a7ee6', corEscura: '#2a4fa8', simbolo: '€' },
+  ouro: { cor: '#f2c94c', corEscura: '#b8901c', simbolo: 'Au' },
+  petroleo: { cor: '#a07a55', corEscura: '#6b4e33', simbolo: 'Br' },
+  spx: { cor: '#e05a5a', corEscura: '#a83434', simbolo: 'US' },
 };
+
+/** Quem trabalha quando ninguém escolheu ainda: um de cada tipo de mercado. */
+const ESCALA_PADRAO = ['btc', 'eth', 'sol', 'acoes', 'ibov', 'dolar', 'ouro', 'spx'];
+const CHAVE_ESCALA = 'escritorio:escala';
+
+function lerEscala() {
+  try {
+    const salva = JSON.parse(localStorage.getItem(CHAVE_ESCALA) ?? 'null');
+    if (Array.isArray(salva)) return salva;
+  } catch {
+    // sem armazenamento: usa a padrão
+  }
+  return ESCALA_PADRAO;
+}
+
+function salvarEscala(ids) {
+  try {
+    localStorage.setItem(CHAVE_ESCALA, JSON.stringify(ids));
+  } catch {
+    // sem armazenamento: vale só nesta visita
+  }
+}
 
 const ANTENA = {
   trabalhando: '#3ddc84',
   dormindo: '#5a6b8a',
+  folga: '#b48cff',
   indo: '#ffd166',
   fila: '#ffd166',
   reuniao: '#5ee7ff',
@@ -72,38 +104,88 @@ export function montarEscritorio(raiz, opcoes = {}) {
 
   // ---------------------------------------------------------------- robôs
 
-  const robos = mercado.ativos.map((ativo, i) => {
+  const escalaInicial = new Set(lerEscala());
+  const vagaLivre = () => D.VAGAS_MESA.findIndex((_, i) => !robos.some((r) => r.vaga === i));
+  /** Lugar livre na sala de descanso; prefere o lado da mesa de onde o robô sai. */
+  function lugarLivre(ladoPreferido) {
+    const livres = D.VAGAS_DESCANSO.map((v, i) => ({ v, i })).filter(({ i }) => !robos.some((r) => r.descanso === i));
+    return (livres.find(({ v }) => v.lado === ladoPreferido) ?? livres[0])?.i ?? 0;
+  }
+  function casaDa(vaga) {
+    const v = D.VAGAS_MESA[vaga];
+    const s = D.escalaEm(v.y);
+    return { x: v.x + v.lado * 80 * s, y: v.y - 3, lift: 86 * s };
+  }
+
+  const robos = [];
+  mercado.ativos.forEach((ativo, i) => {
     const v = VISUAL[ativo.id];
-    const sDesk = D.escalaEm(v.mesa.y);
-    const casa = { x: v.mesa.x + v.lado * 80 * sDesk, y: v.mesa.y - 3, lift: 86 * sDesk };
-    return {
+    const r = {
       id: ativo.id,
       nome: ativo.nome,
       ativo,
       carteira: novaCarteira(),
-      mesa: v.mesa,
-      casa,
-      lado: v.lado,
-      x: casa.x,
-      y: casa.y,
-      lift: casa.lift,
+      vaga: null,
+      descanso: null,
+      casa: null,
+      lado: 1,
+      x: 0,
+      y: 0,
+      lift: 0,
       vel: 0,
       caminho: [],
       aoChegar: null,
       tarefas: [],
-      estado: 'trabalhando',
-      espera: 10 + i * 6,
+      estado: 'folga',
+      espera: 10 + (i % 8) * 6,
       cor: v.cor,
       corEscura: v.corEscura,
       simboloPeito: v.simbolo,
-      antena: ANTENA.trabalhando,
-      emocao: 'normal',
-      olharX: -v.lado,
+      antena: ANTENA.folga,
+      emocao: 'dormindo',
+      olharX: 0,
       olharY: 0.3,
       fase: i * 1.7,
-      digitando: true,
+      digitando: false,
     };
+    robos.push(r);
+    const vaga = escalaInicial.has(ativo.id) ? vagaLivre() : -1;
+    if (vaga >= 0) {
+      sentarNaMesa(r, vaga);
+      r.estado = 'trabalhando';
+      r.antena = ANTENA.trabalhando;
+      r.emocao = 'normal';
+      r.digitando = true;
+    } else {
+      r.descanso = lugarLivre(i % 2 ? 'dir' : 'esq');
+      acomodarNoDescanso(r);
+    }
   });
+
+  function sentarNaMesa(r, vaga) {
+    r.vaga = vaga;
+    r.descanso = null;
+    r.lado = D.VAGAS_MESA[vaga].lado;
+    r.casa = casaDa(vaga);
+    r.x = r.casa.x;
+    r.y = r.casa.y;
+    r.lift = r.casa.lift;
+    r.olharX = -r.lado;
+    r.caneca = false;
+  }
+
+  function acomodarNoDescanso(r) {
+    const lugar = D.VAGAS_DESCANSO[r.descanso];
+    r.x = lugar.x;
+    r.y = lugar.y;
+    r.lift = 0;
+    r.caneca = Boolean(lugar.caneca);
+    r.emocao = r.caneca ? 'feliz' : 'dormindo';
+    r.antena = ANTENA.folga;
+    r.olharX = lugar.lado === 'esq' ? 0.4 : -0.4;
+    r.olharY = 0.4;
+    r.digitando = false;
+  }
 
   const chefe = {
     nome: 'Chefe',
@@ -148,8 +230,12 @@ export function montarEscritorio(raiz, opcoes = {}) {
     r.digitando = false;
   }
 
+  // cada mesa tem um corredor lateral (do lado de fora do robô) que liga a fileira ao corredor
+  // de baixo (reunião) e à faixa de cima (descanso)
+  const corredorDa = (r) => r.casa.x + r.lado * 42;
+
   function caminhoAteCorredor(r) {
-    const lateral = r.casa.x + r.lado * 125;
+    const lateral = corredorDa(r);
     return [
       { x: lateral, y: r.casa.y },
       { x: lateral, y: CORREDOR_Y },
@@ -159,11 +245,126 @@ export function montarEscritorio(raiz, opcoes = {}) {
   }
 
   function caminhoDeVolta(r) {
-    const lateral = r.casa.x + r.lado * 125;
+    const lateral = corredorDa(r);
     const pontos = [];
     if (r.y < 400) pontos.push({ x: 640, y: 420 });
     pontos.push({ x: 640, y: CORREDOR_Y }, { x: lateral, y: CORREDOR_Y }, { x: lateral, y: r.casa.y }, { ...r.casa });
     return pontos;
+  }
+
+  function caminhoAteDescanso(r) {
+    const lugar = D.VAGAS_DESCANSO[r.descanso];
+    const pontos = r.casa && !r.andando ? [{ x: corredorDa(r), y: r.casa.y }, { x: corredorDa(r), y: D.FAIXA_DESCANSO_Y }] : [{ x: r.x, y: D.FAIXA_DESCANSO_Y }];
+    pontos.push({ x: lugar.x, y: D.FAIXA_DESCANSO_Y }, { x: lugar.x, y: lugar.y });
+    return pontos;
+  }
+
+  function caminhoDoDescanso(r) {
+    const lateral = corredorDa(r);
+    return [{ x: r.x, y: D.FAIXA_DESCANSO_Y }, { x: lateral, y: D.FAIXA_DESCANSO_Y }, { x: lateral, y: r.casa.y }, { ...r.casa }];
+  }
+
+  // ---------------------------------------------------------------- escala do dia
+
+  const naMesa = (r) => r.vaga !== null;
+  const ocupado = (r) => ['indo', 'fila', 'reuniao', 'voltando'].includes(r.estado);
+
+  /** Chama para trabalhar. Devolve false se não há mesa livre. */
+  function escalar(r) {
+    r.folgaPedida = false;
+    if (naMesa(r)) return true;
+    const vaga = vagaLivre();
+    if (vaga < 0) return false;
+    r.vaga = vaga;
+    r.descanso = null;
+    r.lado = D.VAGAS_MESA[vaga].lado;
+    r.casa = casaDa(vaga);
+    r.caneca = false;
+    r.emocao = 'surpreso';
+    r.estado = 'indo_mesa';
+    r.antena = ANTENA.trabalhando;
+    falar(r, ['Bora trabalhar!', 'Partiu mesa!', 'Voltei, chefe!'][Math.floor(mercado.rand() * 3)], 1.6);
+    irPara(r, caminhoDoDescanso(r), () => chegarParaTrabalhar(r));
+    return true;
+  }
+
+  function chegarParaTrabalhar(r) {
+    const aberto = mercado.aberto(r.ativo);
+    r.estado = aberto ? 'trabalhando' : 'dormindo';
+    r.emocao = aberto ? 'normal' : 'dormindo';
+    r.antena = aberto ? ANTENA.trabalhando : ANTENA.dormindo;
+    r.digitando = aberto;
+    r.olharX = -r.lado;
+    r.olharY = 0.3;
+    r.espera = 8;
+    falar(r, aberto ? `Na mesa de ${r.ativo.simbolo}.` : `${r.ativo.mercado} está fechado. Espero abrir.`, 1.8);
+  }
+
+  /** Manda descansar. Em reunião ou indo ao chefe, sai quando voltar para a mesa. */
+  function dispensar(r) {
+    if (r.estado === 'folga' || r.estado === 'indo_folga') return;
+    if (ocupado(r)) {
+      r.folgaPedida = true;
+      falar(r, 'Termino esta e já saio de folga.', 1.8);
+      return;
+    }
+    if (r.carteira.quantidade > 0) zerarParaDescansar(r);
+    r.descanso = lugarLivre(D.VAGAS_MESA[r.vaga].x < 640 ? 'esq' : 'dir');
+    const caminho = caminhoAteDescanso(r);
+    r.vaga = null;
+    r.estado = 'indo_folga';
+    r.digitando = false;
+    r.emocao = 'feliz';
+    r.antena = ANTENA.folga;
+    falar(r, ['Hora do café!', 'Folga merecida.', 'Até mais, pessoal!'][Math.floor(mercado.rand() * 3)], 1.6);
+    irPara(r, caminho, () => {
+      r.estado = 'folga';
+      acomodarNoDescanso(r);
+    });
+  }
+
+  /** Quem sai de folga não deixa posição aberta sem ninguém olhando: vende antes (fictício). */
+  function zerarParaDescansar(r) {
+    const preco = r.ativo.preco;
+    const { resultado } = executar(r.carteira, 'venda', preco);
+    const entrada = {
+      hora: `dia ${mercado.relogio.dia} · ${mercado.horaTexto()}`,
+      robo: r,
+      proposta: { lado: 'venda', preco, motivo: 'zerou a posição antes da folga', confianca: 1 },
+      verificacao: { itens: [], nota: 1 },
+      decisao: { aprovado: true, combinada: 1, motivo: 'saída para descanso, sem reunião' },
+      execucao: { preco, resultado },
+    };
+    registro.unshift(entrada);
+    if (registro.length > 60) registro.pop();
+    desenharRegistro();
+    falar(r, `Zerei ${r.ativo.simbolo} antes da folga: ${resultado >= 0 ? '+' : ''}${resultado.toFixed(2)}.`, 2.2);
+  }
+
+  const lembrarEscala = () => salvarEscala(robos.filter((r) => naMesa(r) && !r.folgaPedida).map((r) => r.id));
+
+  /** Põe para trabalhar exatamente estes robôs (até onde houver mesa) e manda os outros descansar. */
+  function aplicarEscala(ids) {
+    const alvo = new Set(ids);
+    for (const r of robos) if (!alvo.has(r.id)) dispensar(r);
+    const semMesa = robos.filter((r) => alvo.has(r.id) && !escalar(r));
+    lembrarEscala();
+    avisoEscala(semMesa.length ? `Só cabem ${D.VAGAS_MESA.length} na mesa: ${semMesa.map((r) => r.nome).join(', ')} ficou de folga.` : '');
+    desenharEscala();
+  }
+
+  /** Liga ou desliga um robô (botão da escala ou do cartão). */
+  function alternarRobo(r) {
+    if (r.folgaPedida) r.folgaPedida = false;
+    else if (naMesa(r)) dispensar(r);
+    else if (!escalar(r)) {
+      avisoEscala(`As ${D.VAGAS_MESA.length} mesas estão ocupadas: mande alguém descansar primeiro.`);
+      return;
+    }
+    avisoEscala('');
+    lembrarEscala();
+    desenharEscala();
+    desenharCartoes();
   }
 
   function mover(r, dt) {
@@ -352,13 +553,14 @@ export function montarEscritorio(raiz, opcoes = {}) {
       r.carteira.aprovadas++;
       const lado = p.lado === 'compra' ? 'COMPRADO' : 'VENDIDO';
       r.flash = { texto: lado, cor: 'rgba(61, 220, 132, ALFA)', ate: tempo + 1.6, duracao: 1.6 };
-      const monitorX = r.mesa.x - r.lado * 38 * D.escalaEm(r.mesa.y);
-      if (p.lado === 'venda' && resultado > 0) soltarParticulas(monitorX, r.mesa.y - 120, 'moeda', 14);
-      else soltarParticulas(monitorX, r.mesa.y - 120, 'faisca', 16, p.lado === 'venda' ? '#ff9f68' : '#3ddc84');
+      const mesa = D.VAGAS_MESA[r.vaga];
+      const monitorX = mesa.x - r.lado * 38 * D.escalaEm(mesa.y);
+      if (p.lado === 'venda' && resultado > 0) soltarParticulas(monitorX, mesa.y - 120, 'moeda', 14);
+      else soltarParticulas(monitorX, mesa.y - 120, 'faisca', 16, p.lado === 'venda' ? '#ff9f68' : '#3ddc84');
       const texto =
         p.lado === 'compra'
           ? `Comprei a ${formatarPreco(r.ativo, preco)}.`
-          : `Vendi a ${formatarPreco(r.ativo, preco)}: ${resultado >= 0 ? 'lucro' : 'prejuízo'} de ${r.ativo.moeda} ${Math.abs(resultado).toFixed(2)}.`;
+          : `Vendi a ${formatarPreco(r.ativo, preco)}: ${resultado >= 0 ? 'lucro' : 'prejuízo'} de ${formatarPreco({ ...r.ativo, casas: 2 }, Math.abs(resultado))}.`;
       falar(r, texto, 2.4);
       atualizarRegistroExecucao(r, preco, resultado);
     } else {
@@ -374,11 +576,12 @@ export function montarEscritorio(raiz, opcoes = {}) {
     agendar(r, 1.5, () => {
       if (r.estado === 'trabalhando') r.emocao = 'normal';
     });
+    if (r.folgaPedida) agendar(r, 2.4, () => r.folgaPedida && dispensar(r));
   }
 
   function forcarSinal(r) {
     if (r.estado !== 'trabalhando') {
-      falar(r, r.estado === 'dormindo' ? 'O mercado está fechado agora.' : 'Já estou ocupado!', 1.6);
+      falar(r, r.estado === 'dormindo' ? 'O mercado está fechado agora.' : r.estado === 'folga' ? 'Estou de folga hoje!' : 'Já estou ocupado!', 1.6);
       return;
     }
     const comPosicao = r.carteira.quantidade > 0;
@@ -420,6 +623,16 @@ export function montarEscritorio(raiz, opcoes = {}) {
       const proposta = analisar(r.ativo, r.carteira);
       if (proposta) iniciarProposta(r, proposta);
     }
+  }
+
+  function conversaDescanso() {
+    const deFolga = robos.filter((x) => x.estado === 'folga' && (!x.fala || x.fala.ate < tempo));
+    if (!deFolga.length) return;
+    const r = deFolga[Math.floor(mercado.rand() * deFolga.length)];
+    const frases = r.caneca
+      ? ['Esse café está ótimo.', `Como está o ${robos.find((x) => naMesa(x))?.ativo.simbolo ?? 'mercado'} hoje?`, 'Pausa estratégica.']
+      : ['Zzz…', 'Só mais cinco minutinhos…', `Sonhando com ${r.ativo.simbolo} subindo…`];
+    falar(r, frases[Math.floor(mercado.rand() * frases.length)], 2.2);
   }
 
   function conversaToa() {
@@ -506,17 +719,63 @@ export function montarEscritorio(raiz, opcoes = {}) {
     el.style.borderLeftColor = r.cor;
     return { r, el };
   });
+  // escala do dia: um botão por robô, agrupados por mercado, e atalhos
+  const textoAviso = h('p', { class: 'rotulo escala-aviso', hidden: true });
+  const contador = h('span', { class: 'rotulo' });
+  const botoesRobo = new Map();
+  const ATALHOS = [
+    ['Só cripto', () => robos.filter((r) => r.ativo.categoria === 'cripto')],
+    ['Só B3', () => robos.filter((r) => r.ativo.categoria === 'b3')],
+    ['Brasil', () => robos.filter((r) => ['b3', 'cambio'].includes(r.ativo.categoria))],
+    ['Lotar as mesas', () => robos.slice(0, D.VAGAS_MESA.length)],
+    ['Todos de folga', () => []],
+  ];
+  const painelEscala = h(
+    'section',
+    { class: 'escala' },
+    h('div', { class: 'escritorio-cartao-topo' }, h('strong', {}, 'Escala de hoje'), contador),
+    h('div', { class: 'acoes' }, ATALHOS.map(([nome, quem]) => h('button', { class: 'pequeno secundario', onclick: () => aplicarEscala(quem().map((r) => r.id)) }, nome))),
+    CATEGORIAS.map((cat) =>
+      h('div', { class: 'escala-grupo' },
+        h('span', { class: 'rotulo' }, cat.nome),
+        h('div', { class: 'escala-robos' }, robos.filter((r) => r.ativo.categoria === cat.id).map((r) => {
+          const b = h('button', { class: 'escala-robo', title: `${r.nome} · ${r.ativo.simbolo}`, onclick: () => alternarRobo(r) }, h('i', {}), r.nome);
+          b.style.setProperty('--cor', r.cor);
+          botoesRobo.set(r, b);
+          return b;
+        })))),
+    textoAviso,
+  );
+  let avisoAte = 0;
+  function avisoEscala(texto) {
+    textoAviso.textContent = texto;
+    textoAviso.hidden = !texto;
+    avisoAte = texto ? performance.now() + 6000 : 0;
+  }
+  function desenharEscala() {
+    const ocupadas = robos.filter(naMesa).length;
+    contador.textContent = `${ocupadas}/${D.VAGAS_MESA.length} mesas`;
+    for (const [r, b] of botoesRobo) {
+      const trabalhando = naMesa(r) && !r.folgaPedida;
+      b.classList.toggle('ligado', trabalhando);
+      b.classList.toggle('andando', r.estado === 'indo_mesa' || r.estado === 'indo_folga' || Boolean(r.folgaPedida));
+      b.setAttribute('aria-pressed', String(trabalhando));
+    }
+    if (avisoAte && performance.now() > avisoAte) avisoEscala('');
+  }
+
   const lateral = h(
     'aside',
     { class: 'escritorio-lado' },
     h('div', { class: 'acoes' }, botaoPausa, ...botoesVel, botaoTela),
-    h('p', { class: 'rotulo' }, 'Dados fictícios: nenhuma ordem de verdade sai desta tela. Clique num robô para ver os detalhes.'),
+    h('p', { class: 'rotulo' }, 'Dados fictícios: nenhuma ordem de verdade sai desta tela. Escolha quem trabalha hoje; quem fica de folga vai para a sala de descanso. Clique num robô para ver os detalhes.'),
     podeConselho
       ? h('label', { class: 'interruptor escritorio-conselho-botao' },
           h('input', { type: 'checkbox', onchange: (ev) => (conselhoLigado = ev.target.checked) }),
           h('span', { class: 'interruptor-trilho' }, h('span', { class: 'interruptor-bola' })),
           h('span', { class: 'interruptor-texto' }, h('span', {}, 'Conselho de IAs na reunião'), h('small', { class: 'rotulo' }, 'consulta as IAs de verdade em cada proposta (gasta créditos); elas só podem vetar')))
       : null,
+    painelEscala,
     h('div', { class: 'escritorio-cartoes' }, cartoes.map((c) => c.el)),
     h('h2', {}, 'Decisões'),
     listaRegistro,
@@ -553,7 +812,11 @@ export function montarEscritorio(raiz, opcoes = {}) {
         fila: 'na fila do chefe',
         reuniao: 'em reunião',
         voltando: 'voltando',
+        indo_mesa: 'indo para a mesa',
+        indo_folga: 'indo descansar',
+        folga: 'de folga',
       }[r.estado];
+      el.hidden = r.estado === 'folga' && r !== selecionado;
       const filhos = [
         h('div', { class: 'escritorio-cartao-topo' }, h('strong', {}, `${r.nome} · ${r.ativo.simbolo}`), h('span', { class: 'rotulo' }, estado)),
         h('div', { class: 'mono' }, formatarPreco(r.ativo, r.ativo.preco), ' ', h('span', { class: r.ativo.variacaoDia >= 0 ? 'ok' : 'perigo-txt' }, `${r.ativo.variacaoDia >= 0 ? '+' : ''}${(r.ativo.variacaoDia * 100).toFixed(2)}%`)),
@@ -573,7 +836,11 @@ export function montarEscritorio(raiz, opcoes = {}) {
             { class: 'rotulo mono' },
             `média 9 ${ult(9).toFixed(r.ativo.casas)} · média 26 ${ult(26).toFixed(r.ativo.casas)} · média 60 ${ult(60).toFixed(r.ativo.casas)} · IFR ${ifr(r.ativo.historico).toFixed(0)}`,
           ),
-          h('div', { class: 'acoes' }, h('button', { class: 'pequeno', disabled: !aberto || r.estado !== 'trabalhando', onclick: (ev) => { ev.stopPropagation(); forcarSinal(r); } }, 'Forçar sinal')),
+          h('div', { class: 'acoes' },
+            h('button', { class: 'pequeno', disabled: !aberto || r.estado !== 'trabalhando', onclick: (ev) => { ev.stopPropagation(); forcarSinal(r); } }, 'Forçar sinal'),
+            naMesa(r)
+              ? h('button', { class: 'pequeno secundario', onclick: (ev) => { ev.stopPropagation(); alternarRobo(r); } }, r.folgaPedida ? 'Folga pedida' : 'Mandar descansar')
+              : h('button', { class: 'pequeno secundario', onclick: (ev) => { ev.stopPropagation(); alternarRobo(r); } }, 'Chamar para trabalhar')),
         );
       }
       el.classList.toggle('selecionado', r === selecionado);
@@ -658,7 +925,8 @@ export function montarEscritorio(raiz, opcoes = {}) {
       passoMercado();
     }
     if (tempo >= proximaConversa) {
-      conversaToa();
+      if (mercado.rand() < 0.3) conversaDescanso();
+      else conversaToa();
       proximaConversa = tempo + 14 + mercado.rand() * 16;
     }
     for (const r of robos) {
@@ -687,10 +955,11 @@ export function montarEscritorio(raiz, opcoes = {}) {
 
     // o resto em ordem de profundidade
     const itens = [];
-    for (const r of robos) {
-      itens.push({ y: r.mesa.y, desenhar: () => D.desenharMesa(ctx, r.mesa, r.ativo, r, tempo, mercado.aberto(r.ativo)) });
-      itens.push({ y: r.y, desenhar: () => desenharRoboNaPosicao(r) });
-    }
+    D.VAGAS_MESA.forEach((vaga, i) => {
+      const dono = robos.find((r) => r.vaga === i);
+      itens.push({ y: vaga.y, desenhar: () => D.desenharMesa(ctx, vaga, dono?.ativo ?? null, dono, tempo, dono ? mercado.aberto(dono.ativo) : false) });
+    });
+    for (const r of robos) itens.push({ y: r.y, desenhar: () => desenharRoboNaPosicao(r) });
     itens.sort((a, b) => a.y - b.y);
     for (const it of itens) it.desenhar();
 
@@ -735,6 +1004,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
     desenhar();
     if (agora >= proximaAtualizacaoDom) {
       desenharCartoes();
+      desenharEscala();
       proximaAtualizacaoDom = agora + 500;
     }
     rafId = requestAnimationFrame(quadro);
@@ -747,6 +1017,6 @@ export function montarEscritorio(raiz, opcoes = {}) {
       observador.disconnect();
     },
     // para testes e demonstração
-    _estado: { robos, chefe, mercado, registro, forcarSinal, definirVelocidade },
+    _estado: { robos, chefe, mercado, registro, forcarSinal, definirVelocidade, aplicarEscala, alternarRobo },
   };
 }
