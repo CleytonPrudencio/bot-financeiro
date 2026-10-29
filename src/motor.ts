@@ -7,9 +7,11 @@ import { avaliar, conferirAnalise, consultaIa, decidirComIa, type AnaliseRecente
 import { consultarIas, type ConectorIa, type PedidoParecer, type RespostaIa } from './ia/index.js';
 import { dadosParaAgente, gravarExecucao, lerConfig, previsaoLigada, rodarAgente, type ResultadoAgente } from './agente/index.js';
 import { lerSinal, type Sinal } from './sinal.js';
-import { CorretoraCcxt, cotacaoPublica } from './brokers/ccxt.js';
+import { CorretoraCcxt } from './brokers/ccxt.js';
+import { cotacaoPublica, MT5 } from './brokers/mercado.js';
+import { CorretoraMt5 } from './brokers/mt5.js';
 import { simularCompra, simularVenda } from './brokers/simulacao.js';
-import { moedas, type Execucao } from './brokers/tipos.js';
+import { moedas, type Corretora, type Execucao } from './brokers/tipos.js';
 
 const chave = derivarChave(config.chaveCifra);
 const EPS = 1e-12;
@@ -24,6 +26,10 @@ export interface Conta {
   api_secret_cifrada: string | null;
   api_senha_cifrada: string | null;
   taxa_simulada_pct: number;
+  ponte_token_hash?: string | null;
+  ponte_token_prefixo?: string | null;
+  ponte_visto_em?: Date | null;
+  ponte_info?: Record<string, unknown> | null;
 }
 
 export interface Estrategia {
@@ -99,7 +105,9 @@ export type Resultado =
   | { status: 404 }
   | { status: 400 | 200 | 502; situacao: string; motivo?: string; ordemId?: number };
 
-export function corretoraReal(conta: Conta): CorretoraCcxt {
+export function corretoraReal(conta: Conta): Corretora {
+  // ações da B3: a ordem vai para a fila da ponte MetaTrader 5 (sem chave de API no bot)
+  if (conta.exchange === MT5) return new CorretoraMt5(conta.id);
   if (!conta.api_key_cifrada || !conta.api_secret_cifrada) throw new Error('conta sem chave de API');
   return new CorretoraCcxt(
     conta.id,

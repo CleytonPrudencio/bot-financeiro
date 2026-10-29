@@ -2,13 +2,13 @@ import { config } from '../config.js';
 import { novoToken } from '../crypto.js';
 import { query, transacao, umOuNada } from '../db.js';
 import { logger } from '../logger.js';
-import { cotacaoPublica, MS_DA_VELA, paresDaMoeda, velas } from '../brokers/ccxt.js';
+import { cotacaoPublica, MS_DA_VELA, MT5, paresDaMoeda, velas } from '../brokers/mercado.js';
 import type { Vela } from '../analise/indicadores.js';
 import { moedas } from '../brokers/tipos.js';
 import { corretoraReal, processarSinalDa, type Conta, type Estrategia, type Resultado } from '../motor.js';
 import { kronosLigado, preverKronos } from '../previsao/kronos.js';
 import { conferirSaida } from '../risco.js';
-import { avaliarEntrada, DIA_MS, filtroDiario, KRONOS_MIN_ALTA, tendenciaQuebrou, velasFechadas } from './regras.js';
+import { avaliarEntrada, b3Aberta, DIA_MS, filtroDiario, KRONOS_MIN_ALTA, tendenciaQuebrou, velasFechadas } from './regras.js';
 
 // Piloto automático: o bot gera os próprios sinais das estratégias com "piloto ligado" e manda pelo
 // mesmo caminho do webhook (processarSinalDa). Então vale tudo: regras de risco, trava por
@@ -28,6 +28,7 @@ export const ORIGEM = 'piloto';
 
 interface EstrategiaPiloto extends Estrategia {
   exchange: string;
+  auto_situacao: string | null;
   conta_modo: 'simulacao' | 'real';
   quantidade: number;
   custo_total: number;
@@ -134,6 +135,12 @@ interface Candidato {
 }
 
 async function cuidar(e: EstrategiaPiloto, agora: number): Promise<void> {
+  // ações da B3: fora do pregão a cotação não anda e a corretora recusa ordem
+  if (e.exchange === MT5 && !b3Aberta(agora)) {
+    const texto = e.quantidade > 0 ? `${e.simbolo}: posição aberta; B3 fechada, o stop volta a valer no pregão` : 'B3 fechada: o piloto volta a olhar as ações no pregão (dias úteis, 10h às 16h55)';
+    if (e.auto_situacao !== texto) await situacao(e.id, texto);
+    return;
+  }
   if (e.quantidade > 0) return cuidarDaPosicao(e, agora);
 
   // sem posição: olha o mercado a cada auto_intervalo_min
@@ -328,13 +335,11 @@ export const PADRAO = {
  * Cria uma vez a estratégia padrão na primeira conta Binance (a real, se houver), em SIMULAÇÃO e com
  * o piloto ligado. Operar real continua sendo decisão do dono (as três chaves).
  */
-export async function garantirEstrategiaPadrao(): Promise<number | null> {
-  const feita = await umOuNada('select 1 from configuracoes where chave = $1', ['estrategia_padrao']);
-  if (feita) return null;
-  const conta = await umOuNada<{ id: number }>(
-    `select id from contas where exchange = 'binance' and not testnet order by (modo = 'real') desc, id limit 1`,
-  );
-  if (!conta) return null;
+/**
+ * Cria uma estratégia de piloto com os valores da padrão (R$ 50, varredura, agente obrigatório,
+ * stop de 3%), em SIMULAÇÃO, e R$ 50 de saldo simulado na conta se ela ainda não tiver reais.
+ */
+export async function criarPilotoPadrao(contaId: number, nome: string, simbolo: string): Promise<number> {
   const t = novoToken(); // ninguém vê este token: o piloto não precisa dele; o painel gera outro se quiser webhook
   const [nova] = await query<{ id: number }>(
     `insert into estrategias (nome, conta_id, simbolo, ativa, real, token_hash, token_prefixo, valor_ordem, limite_por_ordem,
@@ -345,16 +350,26 @@ export async function garantirEstrategiaPadrao(): Promise<number | null> {
      values ($1, $2, $3, true, false, $4, $5, $6, $6, $6, $6, $7, $8,
              'obrigatorio', 'agente', 'reprova', 0.6, false, $9,
              true, $10, $11, $12, $13, true, $14, $15, false) returning id`,
-    [PADRAO.nome, conta.id, PADRAO.simbolo, t.hash, t.prefixo, PADRAO.valor, PADRAO.intervalo_min_seg, PADRAO.desvio_max_pct,
+    [nome, contaId, simbolo, t.hash, t.prefixo, PADRAO.valor, PADRAO.intervalo_min_seg, PADRAO.desvio_max_pct,
       PADRAO.ia_contexto, PADRAO.stop, PADRAO.alvo, PADRAO.protecao, PADRAO.recuo, PADRAO.tempo, PADRAO.intervalo_min],
   );
-  // saldo de mentira para a simulação, se a conta ainda não tem reais simulados
   await query(
     `insert into saldos_simulados (conta_id, moeda, quantidade) values ($1, 'BRL', $2) on conflict (conta_id, moeda) do nothing`,
-    [conta.id, PADRAO.valor],
+    [contaId, PADRAO.valor],
   );
-  await query(`insert into configuracoes (chave, valor) values ('estrategia_padrao', $1)`, [JSON.stringify({ id: nova!.id })]);
-  await query(`insert into eventos (tipo, detalhe) values ('estrategia_padrao_criada', $1)`, [JSON.stringify({ estrategia: nova!.id, conta: conta.id })]);
-  logger.info({ estrategia: nova!.id, conta: conta.id }, 'estratégia padrão criada (simulação, piloto ligado)');
   return nova!.id;
+}
+
+export async function garantirEstrategiaPadrao(): Promise<number | null> {
+  const feita = await umOuNada('select 1 from configuracoes where chave = $1', ['estrategia_padrao']);
+  if (feita) return null;
+  const conta = await umOuNada<{ id: number }>(
+    `select id from contas where exchange = 'binance' and not testnet order by (modo = 'real') desc, id limit 1`,
+  );
+  if (!conta) return null;
+  const id = await criarPilotoPadrao(conta.id, PADRAO.nome, PADRAO.simbolo);
+  await query(`insert into configuracoes (chave, valor) values ('estrategia_padrao', $1)`, [JSON.stringify({ id })]);
+  await query(`insert into eventos (tipo, detalhe) values ('estrategia_padrao_criada', $1)`, [JSON.stringify({ estrategia: id, conta: conta.id })]);
+  logger.info({ estrategia: id, conta: conta.id }, 'estratégia padrão criada (simulação, piloto ligado)');
+  return id;
 }

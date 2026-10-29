@@ -6,7 +6,8 @@ import { config } from '../config.js';
 import { cifrar, derivarChave, novoToken } from '../crypto.js';
 import { query, transacao, umOuNada } from '../db.js';
 import { corretoraReal, type Conta, type Estrategia } from '../motor.js';
-import { cotacaoPublica, exchangePublica, exchangesSuportadas, velasDiarias } from '../brokers/ccxt.js';
+import { cotacaoPublica, exchangesSuportadas, mercadosDa, MT5, velasDiarias } from '../brokers/mercado.js';
+import { criarPilotoPadrao } from '../piloto/index.js';
 import { moedas } from '../brokers/tipos.js';
 import { iniciarAnalise } from '../analise/index.js';
 import { agentePronto, iniciarTeste, lerConfig, salvarConfig, type ConfigAgente } from '../agente/index.js';
@@ -92,8 +93,20 @@ function contaPublica(c: Conta) {
     exchange: c.exchange,
     modo: c.modo,
     testnet: c.testnet,
-    tem_chave: Boolean(c.api_key_cifrada && c.api_secret_cifrada),
+    tem_chave: Boolean(c.api_key_cifrada && c.api_secret_cifrada) || Boolean(c.ponte_token_hash),
     taxa_simulada_pct: c.taxa_simulada_pct,
+    ...(c.exchange === MT5
+      ? {
+          ponte: {
+            token_prefixo: c.ponte_token_prefixo ?? null,
+            visto_em: c.ponte_visto_em ?? null,
+            // só o que serve para conferir no painel: corretora, servidor e saldo (sem login nem senha)
+            corretora: (c.ponte_info?.corretora as string | undefined) ?? null,
+            servidor: (c.ponte_info?.servidor as string | undefined) ?? null,
+            saldo: (c.ponte_info?.saldo as number | undefined) ?? null,
+          },
+        }
+      : {}),
   };
 }
 
@@ -211,17 +224,23 @@ api.get('/contas', async (_req, res) => {
 api.post('/contas', async (req, res) => {
   const d = validar(esquemaConta, req.body);
   if (!exchangesSuportadas().includes(d.exchange)) throw new ErroPedido(`exchange "${d.exchange}" não suportada`);
-  if (d.modo === 'real' && !(d.api_key && d.api_secret)) throw new ErroPedido('conta real precisa de chave e segredo da API');
+  const ehMt5 = d.exchange === MT5;
+  if (d.modo === 'real' && !ehMt5 && !(d.api_key && d.api_secret)) throw new ErroPedido('conta real precisa de chave e segredo da API');
+  // MetaTrader 5 (B3): sem chave de API; a ponte no Windows do dono se identifica com este token
+  const ponte = ehMt5 ? novoToken() : null;
   const conta = await transacao(async (c) => {
     const r = await c.query<Conta>(
-      `insert into contas (nome, exchange, modo, testnet, api_key_cifrada, api_secret_cifrada, api_senha_cifrada, taxa_simulada_pct)
-       values ($1, $2, $3, $4, $5, $6, $7, $8) returning *`,
+      `insert into contas (nome, exchange, modo, testnet, api_key_cifrada, api_secret_cifrada, api_senha_cifrada, taxa_simulada_pct,
+                           ponte_token_hash, ponte_token_prefixo)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning *`,
       [
-        d.nome, d.exchange, d.modo, d.testnet,
-        d.api_key ? cifrar(d.api_key, chave) : null,
-        d.api_secret ? cifrar(d.api_secret, chave) : null,
-        d.api_senha ? cifrar(d.api_senha, chave) : null,
+        d.nome, d.exchange, d.modo, ehMt5 ? false : d.testnet,
+        !ehMt5 && d.api_key ? cifrar(d.api_key, chave) : null,
+        !ehMt5 && d.api_secret ? cifrar(d.api_secret, chave) : null,
+        !ehMt5 && d.api_senha ? cifrar(d.api_senha, chave) : null,
         d.taxa_simulada_pct,
+        ponte?.hash ?? null,
+        ponte?.prefixo ?? null,
       ],
     );
     const nova = r.rows[0]!;
@@ -233,7 +252,11 @@ api.post('/contas', async (req, res) => {
     return nova;
   });
   await evento(req.usuarioId, 'conta_criada', { conta: conta.id, exchange: conta.exchange, modo: conta.modo });
-  res.status(201).json(contaPublica(conta));
+  if (!ponte) return void res.status(201).json(contaPublica(conta));
+  // na B3, já sai um piloto padrão em simulação varrendo as ações que a ponte acompanha
+  const estrategia = await criarPilotoPadrao(conta.id, `Piloto B3 (${conta.nome})`, 'PETR4/BRL');
+  // o token da ponte só aparece agora; no banco fica só o hash
+  res.status(201).json({ ...contaPublica(conta), estrategia_criada: estrategia, ponte_token: ponte.token, url_bot: config.urlPublica });
 });
 
 api.patch('/contas/:id', async (req, res) => {
@@ -249,7 +272,7 @@ api.patch('/contas/:id', async (req, res) => {
   const novoSecret = d.apagar_chaves ? null : d.api_secret ? cifrar(d.api_secret, chave) : atual.api_secret_cifrada;
   const novaSenha = d.apagar_chaves ? null : d.api_senha ? cifrar(d.api_senha, chave) : atual.api_senha_cifrada;
   const modo = d.modo ?? atual.modo;
-  if (modo === 'real' && !(novaKey && novoSecret)) throw new ErroPedido('conta real precisa de chave e segredo da API');
+  if (modo === 'real' && atual.exchange !== MT5 && !(novaKey && novoSecret)) throw new ErroPedido('conta real precisa de chave e segredo da API');
   if (modo === 'simulacao') {
     // conta voltou para simulação: nenhuma estratégia dela pode continuar marcada como real
     await query('update estrategias set real = false where conta_id = $1 and real', [contaId]);
@@ -276,11 +299,16 @@ api.post('/contas/:id/testar', async (req, res) => {
   if (!conta) return void res.status(404).json({ erro: 'conta não existe' });
   const resultado: { publico: string; privado?: string; saldos?: Record<string, number> } = { publico: 'ok' };
   try {
-    await exchangePublica(conta.exchange);
+    if (conta.exchange === MT5) {
+      // a "cotação pública" da B3 é a que a ponte manda: sem ponte, sem cotação
+      if (!Object.keys(await mercadosDa(MT5)).length) throw new Error('a ponte MT5 ainda não mandou cotações (o programa da ponte e o MetaTrader estão abertos?)');
+    } else {
+      await mercadosDa(conta.exchange);
+    }
   } catch (e) {
     resultado.publico = (e as Error).message;
   }
-  if (conta.api_key_cifrada) {
+  if (conta.api_key_cifrada || conta.ponte_token_hash) {
     try {
       resultado.saldos = await corretoraReal(conta).saldos();
       resultado.privado = 'ok';
@@ -359,13 +387,14 @@ function conferirLimites(e: { valor_ordem: number; limite_por_ordem: number; lim
 
 async function conferirSimbolo(exchange: string, simbolo: string): Promise<void> {
   moedas(simbolo);
-  let ex;
+  let mercados;
   try {
-    ex = await exchangePublica(exchange);
+    mercados = await mercadosDa(exchange);
   } catch {
     return; // sem acesso à exchange agora: a conferência fica para o primeiro sinal
   }
-  if (!ex.markets?.[simbolo]) throw new ErroPedido(`o par ${simbolo} não existe na ${exchange}`);
+  // na ponte MT5, a ação pode ainda não estar na lista que ela manda: a ponte passa a acompanhar
+  if (exchange !== MT5 && !mercados[simbolo]) throw new ErroPedido(`o par ${simbolo} não existe na ${exchange}`);
 }
 
 api.get('/estrategias', async (_req, res) => {
@@ -446,6 +475,16 @@ api.patch('/estrategias/:id', async (req, res) => {
   );
   await evento(req.usuarioId, 'estrategia_alterada', { estrategia: estId, mudou: d });
   res.json({ ok: true });
+});
+
+/** Token novo da ponte MetaTrader 5; o antigo para de valer na hora. */
+api.post('/contas/:id/novo-token-ponte', async (req, res) => {
+  const contaId = id(req);
+  const t = novoToken();
+  const r = await query('update contas set ponte_token_hash = $2, ponte_token_prefixo = $3 where id = $1 and exchange = $4 returning id', [contaId, t.hash, t.prefixo, MT5]);
+  if (!r.length) return void res.status(404).json({ erro: 'conta MetaTrader 5 não existe' });
+  await evento(req.usuarioId, 'token_ponte_trocado', { conta: contaId });
+  res.json({ ponte_token: t.token, url_bot: config.urlPublica });
 });
 
 /** Gera um token novo; o antigo para de valer na hora. */

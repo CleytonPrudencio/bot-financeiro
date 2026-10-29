@@ -43,6 +43,8 @@ jobs:
         run: npm test
         env:
           TEST_DATABASE_URL: postgres://postgres:teste@localhost:5432/bot_teste
+      - name: Testes da ponte MetaTrader 5 (funções puras, sem o MT5)
+        run: python3 -m unittest tests/ponte_mt5_test.py
       - run: npm run build
       - name: Imagem Docker monta
         run: docker build -q -t bot-financeiro:ci .

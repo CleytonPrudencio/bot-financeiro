@@ -29,7 +29,10 @@ Escreva em português do Brasil, código e comentários inclusive.
 10. **Piloto automático** (`src/piloto/`) só decide QUANDO pedir: manda o sinal por
     `processarSinalDa`, como o webhook, nunca grava ordem direto. Regra de saída (stop, alvo,
     proteção) fica em `src/risco.ts` (`conferirSaida`) e nunca passa pela IA.
-11. PATCH só muda os campos enviados (`soEnviados`): os `.default()` do zod não podem sobrescrever o
+11. **Ponte MetaTrader 5 (B3)**: a conta `mt5` não tem chave; a ponte se identifica com token (só
+    hash no banco) e só executa ordens que já passaram por `processarSinal`. Dados de mercado de
+    qualquer conta vêm de `src/brokers/mercado.ts` (CCXT ou ponte), nunca do CCXT direto.
+12. PATCH só muda os campos enviados (`soEnviados`): os `.default()` do zod não podem sobrescrever o
     que não veio.
 
 ## Comandos

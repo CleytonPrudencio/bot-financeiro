@@ -449,6 +449,66 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     expect(sinais).toHaveLength(1);
   });
 
+  it('ponte MetaTrader 5: conta com token, cotações e velas da B3 e uma ordem pela fila', async () => {
+    const c = await painel('POST', '/contas', { nome: 'XP', exchange: 'mt5', modo: 'real' });
+    expect(c.status).toBe(201);
+    expect(c.corpo).toMatchObject({ exchange: 'mt5', modo: 'real', tem_chave: true, ponte: { visto_em: null } });
+    const tokenPonte = String(c.corpo.ponte_token);
+    expect(tokenPonte.length).toBeGreaterThan(30);
+    expect(c.corpo.estrategia_criada).toBeGreaterThan(0);
+    expect(JSON.stringify((await painel('GET', '/contas')).corpo)).not.toContain(tokenPonte);
+
+    const sincronizar = async (corpo: unknown, t = tokenPonte) => {
+      const r = await fetch(`${base}/ponte/sincronizar`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${t}` },
+        body: JSON.stringify(corpo),
+      });
+      return { status: r.status, corpo: (await r.json()) as { observar: string[]; tempos: string[]; comandos: { id: number; lado: string; simbolo: string; quantidade: number; idade_s: number }[] } };
+    };
+    expect((await sincronizar({}, 'x'.repeat(43))).status).toBe(401);
+
+    const velasPetr = Array.from({ length: 60 }, (_, i) => [Date.UTC(2026, 7, 1) + i * 86_400_000, 37, 38, 36, 37 + i / 100, 1000]);
+    const r1 = await sincronizar({
+      versao: '1.0',
+      conta: { corretora: 'XP Investimentos', servidor: 'XPMT5-PRD', moeda: 'BRL', saldo: 50, saldo_livre: 50, posicoes: {} },
+      mercado: [{ simbolo: 'PETR4', cotacao: 38, volume_financeiro: 2e9, velas: { '1d': velasPetr } }],
+    });
+    expect(r1.status).toBe(200);
+    expect(r1.corpo.observar).toEqual(expect.arrayContaining(['PETR4', 'VALE3', 'BOVA11']));
+    expect(r1.corpo.tempos).toEqual(expect.arrayContaining(['15m', '1d']));
+    expect(r1.corpo.comandos).toEqual([]);
+
+    const mercado = await import('../src/brokers/mercado.js');
+    expect(await mercado.cotacaoPublica('mt5', 'PETR4/BRL')).toBe(38);
+    expect((await mercado.velas('mt5', 'PETR4/BRL', '1d')).at(-1)).toMatchObject({ fecha: 37.59 });
+    const teste = await painel('POST', `/contas/${c.corpo.id}/testar`);
+    expect(teste.corpo).toMatchObject({ publico: 'ok', privado: 'ok', saldos: { BRL: 50 } });
+
+    // a ordem fica na fila até a ponte pegar; R$ 100 a R$ 38 = 2 ações (B3 só negocia ação inteira)
+    const { CorretoraMt5 } = await import('../src/brokers/mt5.js');
+    const ordem = new CorretoraMt5(Number(c.corpo.id)).comprar('PETR4/BRL', 100, 38);
+    let cmd: { id: number; lado: string; simbolo: string; quantidade: number; idade_s: number } | undefined;
+    for (let i = 0; i < 20 && !cmd; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      cmd = (await sincronizar({})).corpo.comandos[0];
+    }
+    expect(cmd).toMatchObject({ lado: 'compra', simbolo: 'PETR4', quantidade: 2 });
+    expect(cmd!.idade_s).toBeLessThan(5);
+    await sincronizar({ resultados: [{ id: cmd!.id, ok: true, preco: 38.1, quantidade: 2, id_exchange: '991' }] });
+    expect(await ordem).toMatchObject({ quantidade: 2, precoMedio: 38.1, idExchange: '991' });
+
+    // ordem recusada pela ponte vira erro; ordem velha não é entregue (expira)
+    const recusada = new CorretoraMt5(Number(c.corpo.id)).vender('PETR4/BRL', 2, 38).catch((e: Error) => e.message);
+    for (let i = 0; i < 20 && !(cmd = (await sincronizar({})).corpo.comandos[0]); i++) await new Promise((r) => setTimeout(r, 100));
+    await sincronizar({ resultados: [{ id: cmd!.id, ok: false, erro: 'mercado fechado' }] });
+    expect(await recusada).toBe('MT5: mercado fechado');
+    await db.query(`insert into mt5_comandos (conta_id, dados, criado_em) values ($1, '{}', now() - interval '1 minute')`, [c.corpo.id]);
+    expect((await sincronizar({})).corpo.comandos).toEqual([]);
+    const [velha] = await db.query<{ situacao: string }>('select situacao from mt5_comandos order by id desc limit 1');
+    expect(velha!.situacao).toBe('expirado');
+  });
+
   it('auditoria registrou as ações do painel', async () => {
     const tipos = (await db.query<{ tipo: string }>('select tipo from eventos')).map((e) => e.tipo);
     expect(tipos).toEqual(expect.arrayContaining(['login', 'conta_criada', 'estrategia_criada', 'parada_ligada', 'parada_desligada']));

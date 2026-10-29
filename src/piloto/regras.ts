@@ -95,3 +95,18 @@ export function tendenciaQuebrou(fechadas: Vela[]): string | null {
 
 /** Corte prévio pelo Kronos, para não gastar IA à toa: abaixo de 50% de chance de alta, não entra. */
 export const KRONOS_MIN_ALTA = 0.5;
+
+/**
+ * Pregão regular da B3 (ações à vista): segunda a sexta, das 10h às 16h55 de Brasília (depois vem o
+ * leilão de fechamento). Feriado não entra aqui: nesses dias a corretora recusa a ordem.
+ */
+export function b3Aberta(agora: number): boolean {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date(agora))
+      .map((x) => [x.type, x.value]),
+  );
+  if (p.weekday === 'Sat' || p.weekday === 'Sun') return false;
+  const minutos = Number(p.hour) * 60 + Number(p.minute);
+  return minutos >= 10 * 60 && minutos < 16 * 60 + 55;
+}

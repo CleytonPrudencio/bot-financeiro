@@ -197,6 +197,40 @@ regras de risco, a trava por estratégia, o agente de IA nas compras e as três 
 
 Nenhuma regra garante lucro: o stop limita a perda de cada operação, não evita que ela aconteça.
 
+## Ações da B3 (ponte MetaTrader 5)
+
+A B3 não atende pessoa física por API: a ordem passa por uma corretora. O bot usa o **MetaTrader 5**
+da corretora (ex.: XP), por uma **ponte** que roda no Windows do dono, ao lado do MT5 logado
+(`public/ponte-mt5/ponte.py`, baixável pelo painel).
+
+```mermaid
+sequenceDiagram
+    participant P as Ponte (Windows + MT5)
+    participant B as Bot (VM)
+    loop a cada 1 s
+        P->>B: POST /ponte/sincronizar (cotações, velas a cada 60 s, saldo, resultados)
+        B-->>P: ações para acompanhar e ordens pendentes
+    end
+    Note over B: piloto ou webhook, regras de risco, agente e as três chaves
+    B->>B: ordem aprovada vai para a fila (mt5_comandos)
+    P->>B: pega a ordem na próxima sincronização
+    P->>P: order_send no MT5 (lote padrão e fracionário)
+    P->>B: resultado (preço, quantidade) e o bot grava a ordem
+```
+
+- **Conta "mt5"** em Contas: sem chave de API; o painel mostra uma vez o **token da ponte** (no banco,
+  só o hash) e já cria um "Piloto B3" em simulação varrendo as ações de `mt5_universo`
+  (configuracoes): PETR4, VALE3, ITUB4, BOVA11 e outras.
+- **No bot, cada ação é um par em reais** (`PETR4/BRL`); a ponte usa o código puro. Compra só de ação
+  inteira (o valor vira a maior quantidade que ele paga); abaixo de 100, vai pelo fracionário
+  (`PETR4F`).
+- **A ponte só liga para o bot** (nada de porta aberta no roteador) e **não decide nada**: recusa
+  ordem com mais de 20 s de espera e compra acima de `PONTE_VALOR_MAX` (padrão R$ 200). Ordem que a
+  ponte não pega em 30 s expira no bot e não é mais executada; pegou e não respondeu em 60 s vira
+  erro para conferir no MetaTrader.
+- **Pregão**: o piloto só olha a B3 em dias úteis, das 10h às 16h55 de Brasília.
+- Cotações e velas ficam em `mt5_mercado`; a análise usa o BOVA11 como referência de força relativa.
+
 ## Escritório virtual
 
 A página tem dois modos (botões no topo; o padrão é **Ao vivo**):

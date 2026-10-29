@@ -79,3 +79,15 @@ describe('entrada em tendência já em curso', () => {
     expect(avaliarEntrada(velas(queda), { exigirVirada: false }).comprar).toBe(false);
   });
 });
+
+describe('pregão da B3', () => {
+  // 29/10/2026 é quinta-feira; Brasília = UTC-3
+  it('dias úteis, das 10h às 16h55 de Brasília', async () => {
+    const { b3Aberta } = await import('../src/piloto/regras.js');
+    expect(b3Aberta(Date.UTC(2026, 9, 29, 12, 59))).toBe(false); // 9h59
+    expect(b3Aberta(Date.UTC(2026, 9, 29, 13, 0))).toBe(true); // 10h
+    expect(b3Aberta(Date.UTC(2026, 9, 29, 19, 54))).toBe(true); // 16h54
+    expect(b3Aberta(Date.UTC(2026, 9, 29, 19, 55))).toBe(false); // 16h55: leilão de fechamento
+    expect(b3Aberta(Date.UTC(2026, 9, 31, 15, 0))).toBe(false); // sábado
+  });
+});

@@ -1,0 +1,13 @@
+PONTE METATRADER 5 DO BOT FINANCEIRO (ações da B3 pela XP ou outra corretora com MT5)
+
+1. Instale o MetaTrader 5 da sua corretora e faça login na conta (na XP: XP > Plataformas >
+   MetaTrader 5). Ligue o botão "Algo Trading" na barra de cima do MetaTrader.
+2. Instale o Python 3.11 ou mais novo (python.org), marcando "Add Python to PATH".
+3. Ponha ponte.py, iniciar.bat e ponte.env.exemplo numa pasta. Copie ponte.env.exemplo para
+   ponte.env e cole o PONTE_TOKEN que o painel mostrou ao criar a conta MetaTrader 5.
+4. Dê dois cliques em iniciar.bat. A janela deve mostrar "MetaTrader conectado" e
+   "ponte ligada ao bot". Deixe aberta no horário da bolsa (dias úteis, 10h às 17h).
+
+A ponte só liga para o bot (não precisa abrir porta no roteador). Ela nunca decide nada: só executa
+ordens que o bot já aprovou, e recusa ordem velha (mais de 20 s) ou acima do teto PONTE_VALOR_MAX.
+Para parar tudo: feche a janela da ponte, ou use a parada geral no painel do bot.

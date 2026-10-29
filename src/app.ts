@@ -9,6 +9,7 @@ import { pool } from './db.js';
 import { logger } from './logger.js';
 import { api } from './routes/api.js';
 import { webhook } from './routes/webhook.js';
+import { ponte } from './routes/ponte.js';
 
 const iniciadoEm = new Date().toISOString();
 const pastaPublica = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -28,7 +29,8 @@ export function criarApp() {
           url: req.url.replace(/^\/webhook\/([A-Za-z0-9_-]{6})[A-Za-z0-9_-]*/, '/webhook/$1…'),
         }),
       },
-      autoLogging: { ignore: (req) => req.url === '/saude' },
+      // a ponte MT5 sincroniza a cada 1 a 2 s: só os erros dela vão para o log
+      autoLogging: { ignore: (req) => req.url === '/saude' || req.url === '/ponte/sincronizar' },
     }),
   );
 
@@ -61,6 +63,7 @@ export function criarApp() {
   });
 
   app.use('/webhook', webhook);
+  app.use('/ponte', ponte);
   app.use('/api', express.json({ limit: '32kb' }), cookieParser(), api);
   // HTML, JS e CSS revalidam a cada carga (ETag): depois de um deploy, nenhum módulo antigo fica
   // misturado com um novo. As fontes não mudam e ficam um ano.
