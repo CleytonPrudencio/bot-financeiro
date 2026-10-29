@@ -8,7 +8,9 @@ import { consultarIas, type ConectorIa, type PedidoParecer, type RespostaIa } fr
 import { dadosParaAgente, gravarExecucao, lerConfig, previsaoLigada, rodarAgente, type ResultadoAgente } from './agente/index.js';
 import { lerSinal, type Sinal } from './sinal.js';
 import { CorretoraCcxt } from './brokers/ccxt.js';
-import { cotacaoPublica, MT5 } from './brokers/mercado.js';
+import { B3, cotacaoPublica, MT5 } from './brokers/mercado.js';
+import { CorretoraAssistida } from './brokers/b3.js';
+import { agendarAviso, avisoEmAberto, criarAlerta } from './assistente/index.js';
 import { CorretoraMt5 } from './brokers/mt5.js';
 import { simularCompra, simularVenda } from './brokers/simulacao.js';
 import { moedas, type Corretora, type Execucao } from './brokers/tipos.js';
@@ -108,6 +110,8 @@ export type Resultado =
 export function corretoraReal(conta: Conta): Corretora {
   // ações da B3: a ordem vai para a fila da ponte MetaTrader 5 (sem chave de API no bot)
   if (conta.exchange === MT5) return new CorretoraMt5(conta.id);
+  // ações do assistente: só cotação; quem executa é o dono (ver o aviso em processarSinal)
+  if (conta.exchange === B3) return new CorretoraAssistida();
   if (!conta.api_key_cifrada || !conta.api_secret_cifrada) throw new Error('conta sem chave de API');
   return new CorretoraCcxt(
     conta.id,
@@ -138,7 +142,7 @@ async function registrarSinal(
   sinal: Partial<Sinal>,
   corpo: unknown,
   ip: string | null,
-  situacao: 'executado' | 'rejeitado' | 'ignorado' | 'erro',
+  situacao: 'executado' | 'rejeitado' | 'ignorado' | 'erro' | 'alerta',
   motivo: string | null,
 ): Promise<number> {
   const r = await c.query<{ id: number }>(
@@ -299,6 +303,36 @@ export async function processarSinalDa(estrategiaId: number, corpo: unknown, ip:
       if (cotacao !== null) preco = (await cotar(conta, est.simbolo, decisao.modo === 'real')) ?? preco;
     }
 
+    // Assistente (conta "b3", ex.: ações na XP): o dinheiro real não sai por aqui. Com as três chaves
+    // ligadas e tudo aprovado, vira um AVISO para o dono executar na corretora; a ordem só entra no
+    // histórico quando ele confirmar (src/assistente/).
+    if (decisao.modo === 'real' && conta.exchange === B3) {
+      if (await avisoEmAberto(est.id, c)) {
+        const motivo = 'já há um aviso esperando a sua resposta (Telegram ou painel)';
+        await registrarSinal(c, est.id, sinal, corpo, ip, 'ignorado', motivo);
+        return { status: 200, situacao: 'ignorado', motivo };
+      }
+      const quantidade = decisao.lado === 'compra' ? Math.floor(decisao.valor / preco) : Math.floor(decisao.quantidade + 1e-9);
+      if (quantidade < 1) {
+        const motivo = decisao.lado === 'compra' ? `R$ ${decisao.valor} não compra nem 1 ação a R$ ${preco}` : 'a posição tem menos de 1 ação';
+        await gravarConsultas(await registrarSinal(c, est.id, sinal, corpo, ip, 'rejeitado', motivo));
+        return { status: 200, situacao: 'rejeitado', motivo };
+      }
+      const compra = decisao.lado === 'compra';
+      const stop = compra ? preco * (1 - est.auto_stop_pct / 100) : null;
+      const alvo = compra ? preco * (1 + est.auto_alvo_pct / 100) : null;
+      const motivo = `aviso para o dono: ${compra ? 'comprar' : 'vender'} ${quantidade} ${est.simbolo.split('/')[0]} a ~R$ ${preco.toFixed(2)}`;
+      const sinalId = await registrarSinal(c, est.id, sinal, corpo, ip, 'alerta', motivo);
+      await gravarConsultas(sinalId);
+      const alertaId = await criarAlerta(c, {
+        estrategia_id: est.id, sinal_id: sinalId, lado: decisao.lado, simbolo: est.simbolo, quantidade, preco_ref: preco, stop, alvo,
+        motivo: typeof corpo === 'object' && corpo && 'motivo' in corpo ? String((corpo as { motivo: unknown }).motivo).slice(0, 300) : null,
+      });
+      agendarAviso(alertaId);
+      logger.info({ estrategia: est.id, alerta: alertaId, lado: decisao.lado, quantidade, preco }, 'aviso para o dono (assistente)');
+      return { status: 200, situacao: 'alerta', motivo };
+    }
+
     const { base, cotacao: moedaCotacao } = moedas(est.simbolo);
     let exec: Execucao;
     try {
@@ -371,7 +405,7 @@ async function moverSaldo(c: pg.PoolClient, contaId: number, moeda: string, delt
   );
 }
 
-async function atualizarPosicao(
+export async function atualizarPosicao(
   c: pg.PoolClient,
   estrategiaId: number,
   lado: 'compra' | 'venda',
@@ -394,10 +428,11 @@ async function atualizarPosicao(
     }
   }
   await c.query(
-    // maior_preco (piloto) recomeça quando a posição zera ou abre de novo
+    // maior_preco (piloto) e stop_avisado (assistente) recomeçam quando a posição zera ou abre de novo
     `insert into posicoes (estrategia_id, quantidade, custo_total, atualizada_em) values ($1, $2, $3, now())
      on conflict (estrategia_id) do update set quantidade = $2, custo_total = $3, atualizada_em = now(),
-       maior_preco = case when $2 = 0 or posicoes.quantidade = 0 then null else posicoes.maior_preco end`,
+       maior_preco = case when $2 = 0 or posicoes.quantidade = 0 then null else posicoes.maior_preco end,
+       stop_avisado = case when $2 = 0 or posicoes.quantidade = 0 then null else posicoes.stop_avisado end`,
     [estrategiaId, quantidade, custo],
   );
 }

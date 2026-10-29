@@ -5,6 +5,7 @@ import { fecharAnalisesInterrompidas } from './analise/index.js';
 import { fecharTestesInterrompidos } from './agente/index.js';
 import { logger } from './logger.js';
 import { iniciarPiloto } from './piloto/index.js';
+import { iniciarAssistente } from './assistente/index.js';
 
 await migrar();
 await fecharAnalisesInterrompidas();
@@ -17,10 +18,12 @@ const servidor = criarApp().listen(config.porta, () => {
   );
 });
 const pararPiloto = iniciarPiloto();
+const pararAssistente = iniciarAssistente();
 
 function desligar(sinal: string) {
   logger.info({ sinal }, 'desligando');
   pararPiloto();
+  pararAssistente();
   servidor.close(() => {
     void pool.end().then(() => process.exit(0));
   });

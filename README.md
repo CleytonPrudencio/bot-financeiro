@@ -197,6 +197,27 @@ regras de risco, a trava por estratégia, o agente de IA nas compras e as três 
 
 Nenhuma regra garante lucro: o stop limita a perda de cada operação, não evita que ela aconteça.
 
+## Assistente XP (ações da B3 sem API de corretora)
+
+XP e Clear não têm MetaTrader 5 nem API de ordens para pessoa física. O **assistente** divide o
+trabalho: o bot analisa e decide; o dono executa na corretora.
+
+- **Conta "b3 · assistido"** em Contas: sem chave. Cotação e velas do gráfico público do Yahoo
+  Finance (`PETR4.SA`, uns 15 min de atraso, `src/brokers/b3.ts`). Ao criar, sai uma estratégia
+  "Assistente B3" em simulação, varrendo as ações de `b3_universo` em velas diárias, no pregão.
+- **Simulação**: igual às outras contas (saldo de mentira, cotação real).
+- **Real** (as três chaves): o motor não manda ordem. Com tudo aprovado (regras e agente), cria um
+  **aviso** (`alertas`) e manda no Telegram com botões e no painel (página Assistente XP):
+  "COMPRAR 1 PETR4 a ~R$ 38,20; depois registre na XP o STOP em R$ 37,05". O stop fica registrado
+  na própria corretora, então a saída acontece mesmo com o bot fora do ar.
+- A **ordem só entra no histórico quando o dono confirma** (botão "Comprei", "Comprei a outro
+  preço" respondendo "38,10 1", ou no painel): `ordens.manual = true`, posição atualizada na trava
+  da estratégia. Compra sem resposta expira em 30 min; um aviso por vez por estratégia.
+- Com a posição aberta, o piloto manda **"suba o stop para R$ X"** quando a proteção do ganho sobe
+  o stop (`stopSugerido` em `src/risco.ts`) e o aviso de venda no stop, alvo ou tendência.
+- **Telegram**: o dono cria um bot no @BotFather e cola o token no painel (cifrado). Só o chat que
+  mandar `/start <código>` vira o dono; mensagens e botões de outros chats são ignorados.
+
 ## Ações da B3 (ponte MetaTrader 5)
 
 A B3 não atende pessoa física por API: a ordem passa por uma corretora. O bot usa o **MetaTrader 5**

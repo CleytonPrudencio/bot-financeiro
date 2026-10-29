@@ -210,3 +210,20 @@ export function conferirSaida(precoMedio: number, preco: number, maiorPreco: num
   }
   return { sair: false };
 }
+
+/**
+ * O stop que a posição deve ter agora (o mesmo nível em que `conferirSaida` manda sair): o stop de
+ * perda até o ganho chegar a `protecaoPct`; depois, o recuo desde o maior preço, nunca abaixo do
+ * preço médio mais as taxas. O assistente manda o dono registrar este valor na corretora.
+ */
+export function stopSugerido(precoMedio: number, maiorPreco: number, r: RegrasSaida): number {
+  const inicial = precoMedio * (1 - r.stopPct / 100);
+  if (!(maiorPreco >= precoMedio * (1 + r.protecaoPct / 100))) return inicial;
+  return Math.max(maiorPreco * (1 - r.recuoPct / 100), precoMedio * PISO_PROTECAO);
+}
+
+/** Vale avisar o dono para subir o stop? Só quando ele sobe pelo menos `passoPct` (0,5%) sobre o último aviso. */
+export function deveAvisarStop(novo: number, ultimoAvisado: number | null, passoPct = 0.5): boolean {
+  if (ultimoAvisado === null) return false; // o primeiro stop vai no aviso de compra
+  return novo > ultimoAvisado * (1 + passoPct / 100);
+}

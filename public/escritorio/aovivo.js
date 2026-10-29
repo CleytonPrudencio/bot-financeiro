@@ -174,7 +174,9 @@ function motivoDoSinal(s) {
  */
 export function propostaDoSinal(s, ativo) {
   const lado = s.acao === 'comprar' ? 'compra' : 'venda';
-  const executado = s.situacao === 'executado';
+  // "alerta": aprovado, mas no assistente quem executa é o dono (aviso no Telegram e no painel)
+  const aviso = s.situacao === 'alerta';
+  const executado = s.situacao === 'executado' || aviso;
   const origem = s.ip === 'piloto' ? 'Piloto automático' : 'Webhook';
   const itens = [{ texto: `Origem: ${origem}`, ok: true, peso: 1 }];
   const etapas = s.agente?.etapas ?? {};
@@ -191,6 +193,7 @@ export function propostaDoSinal(s, ativo) {
     }
   }
   itens.push({ texto: curto(executado ? 'Regras de risco: aprovado' : `Barrado: ${s.motivo ?? s.situacao}`), ok: executado, peso: 2 });
+  if (aviso) itens.push({ texto: 'Aviso enviado: o dono executa na XP', ok: true, peso: 1 });
   const confianca = s.agente?.confianca ?? (executado ? 1 : 0);
   const modo = s.ordem?.modo === 'real' ? 'REAL' : 'simulada';
   return {
@@ -209,10 +212,12 @@ export function propostaDoSinal(s, ativo) {
     decisao: {
       aprovado: executado,
       combinada: Number(confianca),
-      motivo: executado ? `ordem ${modo} executada` : s.motivo ?? s.situacao,
+      motivo: aviso ? 'aviso enviado ao dono' : executado ? `ordem ${modo} executada` : s.motivo ?? s.situacao,
     },
-    rodape: `${origem} · ${executado ? `ordem ${modo}` : s.situacao}${s.agente ? ` · agente ${Math.round(Number(confianca) * 100)}%` : ''}`,
-    falaChefe: executado
+    rodape: `${origem} · ${aviso ? 'aviso ao dono' : executado ? `ordem ${modo}` : s.situacao}${s.agente ? ` · agente ${Math.round(Number(confianca) * 100)}%` : ''}`,
+    falaChefe: aviso
+      ? 'Aprovado. Mandei o aviso: execute na XP e me confirme.'
+      : executado
       ? `Aprovado. Ordem ${modo} executada a ${Number(s.ordem?.preco ?? 0).toLocaleString('pt-BR')}.`
       : `Não agora: ${curto(s.motivo ?? s.situacao, 70)}.`,
   };

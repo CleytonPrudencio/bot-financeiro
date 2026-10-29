@@ -1,6 +1,6 @@
 import { query } from '../db.js';
 import { logger } from '../logger.js';
-import { MT5, velasDiarias } from '../brokers/mercado.js';
+import { ehB3, velasDiarias } from '../brokers/mercado.js';
 import { chamarIa, mensagemDeErro, type ConectorIa } from '../ia/index.js';
 import { AGENTES, ESQUEMA_AGENTE, sistemaDoAgente, type Agente } from './agentes.js';
 import { resumoTecnico } from './indicadores.js';
@@ -33,7 +33,7 @@ export async function dadosDeMercado(exchange: string | null, simbolo: string, o
   const [base, cotacao] = simbolo.split('/');
   if (base !== 'BTC' && cotacao) {
     // força relativa: contra o BTC nas exchanges de cripto; contra o Ibovespa (BOVA11) na B3
-    referencia = await velasDiarias(exchange, exchange === MT5 ? 'BOVA11/BRL' : `BTC/${cotacao.split(':')[0]}`)
+    referencia = await velasDiarias(exchange, ehB3(exchange) ? 'BOVA11/BRL' : `BTC/${cotacao.split(':')[0]}`)
       .then((v) => v.map((c) => c.fecha))
       .catch(() => undefined);
   }

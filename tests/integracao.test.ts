@@ -49,6 +49,10 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
   const pedidosIa: { auth?: string; corpo: { messages: { content: string }[] } }[] = [];
   let kronosFalso: Server;
   let chamadasKronos = 0;
+  // Yahoo falso (cotações da B3 do assistente) e Telegram falso (avisos)
+  let yahooFalso: Server;
+  let telegramFalso: Server;
+  const mensagensTelegram: { metodo: string; corpo: Record<string, unknown> }[] = [];
 
   const painel = async (metodo: string, caminho: string, corpo?: unknown) => {
     const r = await fetch(base + '/api' + caminho, {
@@ -87,6 +91,39 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
       });
     }).listen(0);
     process.env.KRONOS_URL = `http://127.0.0.1:${(kronosFalso.address() as AddressInfo).port}`;
+    yahooFalso = createServer((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      if (!String(req.url).includes('/PETR4.SA')) {
+        res.statusCode = 404;
+        return void res.end('{"chart":{"result":null,"error":{"description":"No data found"}}}');
+      }
+      const t0 = Date.UTC(2026, 0, 2, 13);
+      const n = 250;
+      res.end(JSON.stringify({ chart: { result: [{
+        meta: { regularMarketPrice: 38.2 },
+        timestamp: Array.from({ length: n }, (_, i) => t0 / 1000 + i * 86_400),
+        indicators: { quote: [{
+          open: Array.from({ length: n }, (_, i) => 30 + i * 0.03),
+          high: Array.from({ length: n }, (_, i) => 30.5 + i * 0.03),
+          low: Array.from({ length: n }, (_, i) => 29.5 + i * 0.03),
+          close: Array.from({ length: n }, (_, i) => (i === 10 ? null : 30.1 + i * 0.03)),
+          volume: Array.from({ length: n }, () => 30_000_000),
+        }] },
+      }], error: null } }));
+    }).listen(0);
+    telegramFalso = createServer((req, res) => {
+      let corpo = '';
+      req.on('data', (p) => (corpo += p));
+      req.on('end', () => {
+        const metodo = String(req.url).split('/').pop()!;
+        mensagensTelegram.push({ metodo, corpo: JSON.parse(corpo || '{}') });
+        res.setHeader('content-type', 'application/json');
+        const result = metodo === 'getMe' ? { username: 'meu_bot_teste' } : metodo === 'getUpdates' ? [] : { message_id: 500 + mensagensTelegram.length };
+        res.end(JSON.stringify({ ok: true, result }));
+      });
+    }).listen(0);
+    process.env.B3_COTACOES_URL = `http://127.0.0.1:${(yahooFalso.address() as AddressInfo).port}`;
+    process.env.TELEGRAM_API_URL = `http://127.0.0.1:${(telegramFalso.address() as AddressInfo).port}`;
     Object.assign(process.env, {
       DATABASE_URL: URL_BANCO,
       BOT_SESSION_SECRET: 'segredo-de-teste',
@@ -118,6 +155,8 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     servidor?.close();
     iaFalsa?.close();
     kronosFalso?.close();
+    yahooFalso?.close();
+    telegramFalso?.close();
     await db?.pool.end();
   });
 
@@ -507,6 +546,82 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     expect((await sincronizar({})).corpo.comandos).toEqual([]);
     const [velha] = await db.query<{ situacao: string }>('select situacao from mt5_comandos order by id desc limit 1');
     expect(velha!.situacao).toBe('expirado');
+  });
+
+  it('assistente B3: conta sem chave, cotação do Yahoo, Telegram pareado e avisos confirmados pelo dono', async () => {
+    const c = await painel('POST', '/contas', { nome: 'XP', exchange: 'b3', modo: 'real' });
+    expect(c.status).toBe(201);
+    expect(c.corpo).toMatchObject({ exchange: 'b3', modo: 'real', testnet: false });
+    const estId = Number(c.corpo.estrategia_criada);
+    const [est] = await db.query<Record<string, unknown>>('select * from estrategias where id = $1', [estId]);
+    expect(est).toMatchObject({ simbolo: 'PETR4/BRL', real: false, auto_ligado: true, auto_varrer: true, auto_tempo: '1d', auto_intervalo_min: 10 });
+
+    const mercado = await import('../src/brokers/mercado.js');
+    expect(await mercado.cotacaoPublica('b3', 'PETR4/BRL')).toBe(38.2);
+    const velas = await mercado.velas('b3', 'PETR4/BRL', '1d');
+    expect(velas).toHaveLength(249); // a vela sem fechamento (null) fica de fora
+    await expect(mercado.cotacaoPublica('b3', 'XPTO3/BRL')).rejects.toThrow('não existe');
+
+    // Telegram: token conferido no getMe, código de pareamento, e só o chat com o código vira o dono
+    expect((await painel('PUT', '/telegram', { token: 'curto' })).status).toBe(400);
+    const tg = await painel('PUT', '/telegram', { token: '123456789:AAHfakeTokenParaTeste_abcdefghij' });
+    expect(tg.corpo).toMatchObject({ configurado: true, bot: 'meu_bot_teste', pareado: false });
+    expect(JSON.stringify((await painel('GET', '/telegram')).corpo)).not.toContain('AAHfake');
+    const { tratarAtualizacao } = await import('../src/assistente/index.js');
+    await tratarAtualizacao({ update_id: 1, message: { message_id: 1, chat: { id: 999 }, text: '/start ERRADO' } });
+    expect((await painel('GET', '/telegram')).corpo).toMatchObject({ pareado: false });
+    await tratarAtualizacao({ update_id: 2, message: { message_id: 2, chat: { id: 4242 }, text: `/start ${tg.corpo.codigo}` } });
+    expect((await painel('GET', '/telegram')).corpo).toMatchObject({ pareado: true });
+    expect(mensagensTelegram.at(-1)).toMatchObject({ metodo: 'sendMessage', corpo: { chat_id: 4242 } });
+
+    // aviso de compra (o motor cria com as três chaves; aqui direto): vai para o Telegram com botões
+    const { notificarAlerta } = await import('../src/assistente/index.js');
+    const [a1] = await db.query<{ id: number }>(
+      `insert into alertas (estrategia_id, lado, simbolo, quantidade, preco_ref, stop, alvo, motivo, expira_em)
+       values ($1, 'compra', 'PETR4/BRL', 1, 38.2, 37.05, 40.49, 'virada para alta', now() + interval '30 minutes') returning id`, [estId]);
+    await notificarAlerta(a1!.id);
+    const aviso = mensagensTelegram.at(-1)!;
+    expect(String(aviso.corpo.text)).toContain('COMPRAR 1 ação de PETR4');
+    expect(String(aviso.corpo.text)).toContain('STOP de venda em R$ 37,05');
+    expect(JSON.stringify(aviso.corpo.reply_markup)).toContain(`c:${a1!.id}`);
+
+    // alguém que não é o dono aperta o botão: nada acontece
+    await tratarAtualizacao({ update_id: 3, callback_query: { id: 'x', data: `c:${a1!.id}`, message: { message_id: 9, chat: { id: 999 } } } });
+    expect((await db.query<{ situacao: string }>('select situacao from alertas where id = $1', [a1!.id]))[0]!.situacao).toBe('pendente');
+
+    // o dono comprou a outro preço: responde "38,10 1" à pergunta do bot
+    await tratarAtualizacao({ update_id: 4, callback_query: { id: 'y', data: `p:${a1!.id}`, message: { message_id: 9, chat: { id: 4242 } } } });
+    const [{ pergunta_msg_id: pergunta }] = await db.query<{ pergunta_msg_id: number }>('select pergunta_msg_id from alertas where id = $1', [a1!.id]) as [{ pergunta_msg_id: number }];
+    await tratarAtualizacao({ update_id: 5, message: { message_id: 10, chat: { id: 4242 }, text: '38,10 1', reply_to_message: { message_id: pergunta } } });
+    const [ordem] = await db.query<Record<string, unknown>>('select * from ordens where estrategia_id = $1', [estId]);
+    expect(ordem).toMatchObject({ lado: 'compra', modo: 'real', manual: true, quantidade: 1, preco_medio: 38.1, situacao: 'executada' });
+    const [pos] = await db.query<Record<string, unknown>>('select * from posicoes where estrategia_id = $1', [estId]);
+    expect(pos).toMatchObject({ quantidade: 1, custo_total: 38.1, stop_avisado: 37.05 });
+    // confirmar de novo não duplica
+    expect((await painel('POST', `/alertas/${a1!.id}/confirmar`, {})).status).toBe(400);
+
+    // aviso de venda pelo painel: "ainda tenho" e depois "vendi"
+    const [a2] = await db.query<{ id: number }>(`insert into alertas (estrategia_id, lado, simbolo, quantidade, preco_ref) values ($1, 'venda', 'PETR4/BRL', 1, 37) returning id`, [estId]);
+    const { avisoEmAberto } = await import('../src/assistente/index.js');
+    expect(await avisoEmAberto(estId)).toBe(true);
+    expect((await painel('POST', `/alertas/${a2!.id}/recusar`, {})).corpo).toMatchObject({ ok: true });
+    expect(await avisoEmAberto(estId)).toBe(true); // recusou a venda há pouco: não repete por 30 min
+    const [a3] = await db.query<{ id: number }>(`insert into alertas (estrategia_id, lado, simbolo, quantidade, preco_ref) values ($1, 'venda', 'PETR4/BRL', 5, 37) returning id`, [estId]);
+    const vendi = await painel('POST', `/alertas/${a3!.id}/confirmar`, { preco: 36.9 });
+    expect(vendi.corpo).toMatchObject({ ok: true });
+    const [posDepois] = await db.query<Record<string, unknown>>('select * from posicoes where estrategia_id = $1', [estId]);
+    expect(posDepois).toMatchObject({ quantidade: 0, stop_avisado: null });
+    const vendas = await db.query<{ quantidade: number }>(`select quantidade from ordens where estrategia_id = $1 and lado = 'venda'`, [estId]);
+    expect(vendas).toEqual([{ quantidade: 1 }]); // vende só o que tinha
+
+    // compra sem resposta expira
+    const [a4] = await db.query<{ id: number }>(
+      `insert into alertas (estrategia_id, lado, simbolo, quantidade, preco_ref, expira_em) values ($1, 'compra', 'PETR4/BRL', 1, 38, now() - interval '1 minute') returning id`, [estId]);
+    const { expirarAlertas } = await import('../src/assistente/index.js');
+    await expirarAlertas();
+    expect((await db.query<{ situacao: string }>('select situacao from alertas where id = $1', [a4!.id]))[0]!.situacao).toBe('expirado');
+    const lista = await painel('GET', '/alertas');
+    expect((lista.corpo as unknown as { situacao: string }[]).map((x) => x.situacao)).toEqual(expect.arrayContaining(['confirmado', 'recusado', 'expirado']));
   });
 
   it('auditoria registrou as ações do painel', async () => {

@@ -11,7 +11,12 @@ function tabelaSimples(colunas, linhas, textoVazio) {
 }
 
 // As mais usadas no Brasil primeiro; o resto do CCXT vem depois, em ordem alfabética.
-const PRINCIPAIS = ['binance', 'mt5', 'mercado', 'bybit', 'okx', 'foxbit', 'bitso', 'bitget', 'kucoin', 'coinbase', 'kraken'];
+const PRINCIPAIS = ['binance', 'b3', 'mt5', 'mercado', 'bybit', 'okx', 'foxbit', 'bitso', 'bitget', 'kucoin', 'coinbase', 'kraken'];
+
+const ROTULOS = {
+  b3: 'b3 · Ações da B3, assistido (você executa na XP)',
+  mt5: 'mt5 · MetaTrader 5 (ações da B3 pela ponte)',
+};
 
 // Lista fechada (select), e não campo de texto: o Chrome preenchia o e-mail salvo no campo da
 // exchange por achar que o formulário com senha era de login.
@@ -21,8 +26,18 @@ function seletorExchange(exchanges) {
   return h('label', { class: 'campo' },
     h('span', { class: 'campo-rotulo' }, 'Exchange'),
     h('select', { name: 'exchange', required: true },
-      h('optgroup', { label: 'Principais' }, principais.map((e, i) => h('option', { value: e, selected: i === 0 }, e === 'mt5' ? 'mt5 · MetaTrader 5 (ações da B3: XP, Clear…)' : e))),
+      h('optgroup', { label: 'Principais' }, principais.map((e, i) => h('option', { value: e, selected: i === 0 }, ROTULOS[e] ?? e))),
       h('optgroup', { label: 'Todas do CCXT' }, resto.map((e) => h('option', { value: e }, e)))));
+}
+
+/** Depois de criar a conta assistida (B3): o que acontece e o próximo passo (Telegram). */
+function janelaAssistente(r) {
+  janela('Assistente B3 criado', { icone: 'ok', largura: 'media' },
+    h('p', {}, 'Criei também a estratégia "Assistente B3" em simulação: ela olha as ações mais negociadas em velas diárias, no pregão.'),
+    h('ul', {},
+      h('li', {}, 'Em simulação, o bot opera sozinho com saldo de mentira e cotação real (atraso de uns 15 min).'),
+      h('li', {}, 'Em real (conta Real + "Operar real" na estratégia), cada compra e venda vira um aviso para você executar na XP.')),
+    h('div', { class: 'acoes acoes-fim' }, h('a', { class: 'botao', href: '#/assistente' }, icone('enviar'), h('span', {}, 'Ligar os avisos no Telegram'))));
 }
 
 /** Depois de criar a conta MetaTrader 5: o token da ponte (só agora) e como instalar no Windows. */
@@ -62,6 +77,7 @@ function novaConta(exchanges, recarregar) {
           dlg.fechar();
           recarregar();
           if (r.ponte_token) janelaPonte(r);
+          if (r.exchange === 'b3') janelaAssistente(r);
         }
       },
     },
@@ -75,7 +91,8 @@ function novaConta(exchanges, recarregar) {
       campo('Moeda', { name: 'saldo_moeda', placeholder: 'USDT ou BRL' }),
       campo('Quantidade', { name: 'saldo_quantidade', type: 'number', step: 'any', min: '0', placeholder: '1000' }),
     ),
-    h('div', { class: 'destaque' }, icone('escritorio'), h('p', {}, 'Ações da B3 (XP e outras corretoras com MetaTrader 5): escolha "mt5" na exchange. Não precisa de chave de API: depois de criar, o painel mostra um token e como ligar a ponte no seu Windows.')),
+    h('div', { class: 'destaque' }, icone('enviar'), h('p', {}, 'Ações da B3 na XP (ou outra corretora sem API): escolha "b3 · assistido". O bot analisa e avisa; você executa na corretora. Não precisa de chave.')),
+    h('div', { class: 'destaque' }, icone('escritorio'), h('p', {}, 'Corretora com MetaTrader 5: escolha "mt5". Não precisa de chave de API: depois de criar, o painel mostra um token e como ligar a ponte no seu Windows.')),
     h('div', { class: 'destaque' }, icone('chave'), h('p', {}, 'Chaves de API: só para modo real ou para consultar saldo. Crie a chave na exchange sem permissão de saque e, se der, restrita ao IP 77.42.120.142. Elas ficam cifradas e nunca voltam para a tela.')),
     secao('Chaves de API',
       campo('API key', { name: 'api_key', autocomplete: 'off' }),

@@ -32,7 +32,10 @@ Escreva em português do Brasil, código e comentários inclusive.
 11. **Ponte MetaTrader 5 (B3)**: a conta `mt5` não tem chave; a ponte se identifica com token (só
     hash no banco) e só executa ordens que já passaram por `processarSinal`. Dados de mercado de
     qualquer conta vêm de `src/brokers/mercado.ts` (CCXT ou ponte), nunca do CCXT direto.
-12. PATCH só muda os campos enviados (`soEnviados`): os `.default()` do zod não podem sobrescrever o
+12. **Assistente (conta `b3`)**: no real, o motor nunca manda ordem; cria um aviso
+    (`src/assistente/`) e a ordem só entra no histórico (`manual = true`) quando o dono confirma.
+    Só o chat pareado do Telegram responde; o token do bot fica cifrado.
+13. PATCH só muda os campos enviados (`soEnviados`): os `.default()` do zod não podem sobrescrever o
     que não veio.
 
 ## Comandos

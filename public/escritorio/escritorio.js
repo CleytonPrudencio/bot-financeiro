@@ -580,7 +580,9 @@ export function montarEscritorio(raiz, opcoes = {}) {
       const monitorX = mesa.x - r.lado * 38 * D.escalaEm(mesa.y);
       if (p.lado === 'venda' && (resultado > 0 || (p.real && p.preco > r.carteira.precoEntrada))) soltarParticulas(monitorX, mesa.y - 120, 'moeda', 14);
       else soltarParticulas(monitorX, mesa.y - 120, 'faisca', 16, p.lado === 'venda' ? '#ff9f68' : '#3ddc84');
-      const texto = p.real
+      const texto = p.real && !p.ordem
+        ? `Avisei o dono: ${p.lado === 'compra' ? 'comprar' : 'vender'} na XP.`
+        : p.real
         ? `${p.lado === 'compra' ? 'Comprei' : 'Vendi'} a ${formatarPreco(r.ativo, preco)} (${p.ordem?.modo === 'real' ? 'ordem real' : 'simulação'}).`
         : p.lado === 'compra'
           ? `Comprei a ${formatarPreco(r.ativo, preco)}.`

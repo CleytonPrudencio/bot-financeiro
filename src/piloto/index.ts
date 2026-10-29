@@ -2,12 +2,13 @@ import { config } from '../config.js';
 import { novoToken } from '../crypto.js';
 import { query, transacao, umOuNada } from '../db.js';
 import { logger } from '../logger.js';
-import { cotacaoPublica, MS_DA_VELA, MT5, paresDaMoeda, velas } from '../brokers/mercado.js';
+import { B3, cotacaoPublica, ehB3, MS_DA_VELA, paresDaMoeda, velas } from '../brokers/mercado.js';
+import { avisarStop, avisoEmAberto } from '../assistente/index.js';
 import type { Vela } from '../analise/indicadores.js';
 import { moedas } from '../brokers/tipos.js';
 import { corretoraReal, processarSinalDa, type Conta, type Estrategia, type Resultado } from '../motor.js';
 import { kronosLigado, preverKronos } from '../previsao/kronos.js';
-import { conferirSaida } from '../risco.js';
+import { conferirSaida, deveAvisarStop, stopSugerido } from '../risco.js';
 import { avaliarEntrada, b3Aberta, DIA_MS, filtroDiario, KRONOS_MIN_ALTA, tendenciaQuebrou, velasFechadas } from './regras.js';
 
 // Piloto automático: o bot gera os próprios sinais das estratégias com "piloto ligado" e manda pelo
@@ -33,10 +34,15 @@ interface EstrategiaPiloto extends Estrategia {
   quantidade: number;
   custo_total: number;
   maior_preco: number | null;
+  stop_avisado: number | null;
 }
 
 const pct = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
 const textoResultado = (r: Resultado) => (r.status === 404 ? 'estratégia sumiu' : `${r.situacao}${r.motivo ? `: ${r.motivo}` : ''}`);
+
+const operaReal = (e: EstrategiaPiloto) => e.real && e.conta_modo === 'real' && config.realLiberadoNoServidor;
+/** Assistente no dinheiro real: quem executa é o dono, a partir do aviso. */
+const assistidoReal = (e: EstrategiaPiloto) => e.exchange === B3 && operaReal(e);
 
 async function situacao(id: number, texto: string): Promise<void> {
   await query(`update estrategias set auto_situacao = $2, auto_checado_em = now() where id = $1`, [id, texto.slice(0, 500)]);
@@ -58,7 +64,9 @@ async function gravarVarredura(id: number, olhados: Olhado[]): Promise<void> {
 /** Quanto comprar: o valor da estratégia, ou o saldo livre (menos 1%) se for menor. Nunca mais que o valor. */
 async function valorDaCompra(e: EstrategiaPiloto): Promise<number | null> {
   const moeda = moedas(e.simbolo).cotacao;
-  const real = e.real && e.conta_modo === 'real' && config.realLiberadoNoServidor;
+  const real = operaReal(e);
+  // assistente: o bot não vê o saldo da corretora; o aviso sugere o valor da estratégia
+  if (real && e.exchange === B3) return e.valor_ordem;
   let livre: number;
   if (real) {
     const conta = (await umOuNada<Conta>('select * from contas where id = $1', [e.conta_id]))!;
@@ -136,7 +144,7 @@ interface Candidato {
 
 async function cuidar(e: EstrategiaPiloto, agora: number): Promise<void> {
   // ações da B3: fora do pregão a cotação não anda e a corretora recusa ordem
-  if (e.exchange === MT5 && !b3Aberta(agora)) {
+  if (ehB3(e.exchange) && !b3Aberta(agora)) {
     const texto = e.quantidade > 0 ? `${e.simbolo}: posição aberta; B3 fechada, o stop volta a valer no pregão` : 'B3 fechada: o piloto volta a olhar as ações no pregão (dias úteis, 10h às 16h55)';
     if (e.auto_situacao !== texto) await situacao(e.id, texto);
     return;
@@ -232,7 +240,7 @@ async function cuidar(e: EstrategiaPiloto, agora: number): Promise<void> {
   if (valor === null) return situacao(e.id, `${melhor.simbolo}: ${melhor.motivo}${kronos}, mas não há saldo livre para comprar`);
   const r = await processarSinalDa(
     e.id,
-    { acao: 'comprar', simbolo: melhor.simbolo, preco, valor, id: `piloto-entrada-${melhor.simbolo}-${melhor.vela}` },
+    { acao: 'comprar', simbolo: melhor.simbolo, preco, valor, id: `piloto-entrada-${melhor.simbolo}-${melhor.vela}`, motivo: `${melhor.motivo}${kronos}` },
     ORIGEM,
   );
   logger.info({ estrategia: e.id, simbolo: melhor.simbolo, resultado: textoResultado(r) }, 'piloto: entrada');
@@ -247,11 +255,22 @@ async function cuidarDaPosicao(e: EstrategiaPiloto, agora: number): Promise<void
     `update posicoes set maior_preco = greatest(coalesce(maior_preco, $2), $2) where estrategia_id = $1 returning maior_preco`,
     [e.id, preco],
   );
-  const saida = conferirSaida(precoMedio, preco, p?.maior_preco ?? preco, {
-    stopPct: e.auto_stop_pct, alvoPct: e.auto_alvo_pct, protecaoPct: e.auto_protecao_pct, recuoPct: e.auto_recuo_pct,
-  });
+  const regras = { stopPct: e.auto_stop_pct, alvoPct: e.auto_alvo_pct, protecaoPct: e.auto_protecao_pct, recuoPct: e.auto_recuo_pct };
+  const maior = p?.maior_preco ?? preco;
+  const saida = conferirSaida(precoMedio, preco, maior, regras);
+  // assistente: enquanto o dono não responde o aviso, não repete; o stop dele está registrado na corretora
+  if (assistidoReal(e) && (await avisoEmAberto(e.id))) {
+    return situacao(e.id, `${e.simbolo}: aguardando a sua resposta ao aviso (Telegram ou painel)`);
+  }
+  if (assistidoReal(e) && !saida.sair) {
+    const stop = stopSugerido(precoMedio, maior, regras);
+    if (deveAvisarStop(stop, e.stop_avisado)) {
+      await avisarStop(e.simbolo, e.quantidade, stop, `O ganho chegou a ${pct((maior / precoMedio - 1) * 100)}: subindo o stop protege o lucro.`);
+      await query('update posicoes set stop_avisado = $2 where estrategia_id = $1', [e.id, stop]);
+    }
+  }
   if (saida.sair) {
-    const r = await processarSinalDa(e.id, { acao: 'zerar', simbolo: e.simbolo, preco, id: `piloto-${saida.tipo}-${agora}` }, ORIGEM);
+    const r = await processarSinalDa(e.id, { acao: 'zerar', simbolo: e.simbolo, preco, id: `piloto-${saida.tipo}-${agora}`, motivo: saida.motivo }, ORIGEM);
     logger.info({ estrategia: e.id, tipo: saida.tipo, resultado: textoResultado(r) }, 'piloto: saída');
     return situacao(e.id, `${e.simbolo}: ${saida.motivo} → ${textoResultado(r)}`);
   }
@@ -275,7 +294,7 @@ export async function rodadaPiloto(agora = Date.now()): Promise<void> {
   await garantirEstrategiaPadrao();
   const estrategias = await query<EstrategiaPiloto>(
     `select e.*, c.exchange, c.modo as conta_modo,
-            coalesce(p.quantidade, 0) as quantidade, coalesce(p.custo_total, 0) as custo_total, p.maior_preco
+            coalesce(p.quantidade, 0) as quantidade, coalesce(p.custo_total, 0) as custo_total, p.maior_preco, p.stop_avisado
        from estrategias e join contas c on c.id = e.conta_id left join posicoes p on p.estrategia_id = e.id
       where e.ativa and e.auto_ligado order by e.id`,
   );
@@ -339,7 +358,12 @@ export const PADRAO = {
  * Cria uma estratégia de piloto com os valores da padrão (R$ 50, varredura, agente obrigatório,
  * stop de 3%), em SIMULAÇÃO, e R$ 50 de saldo simulado na conta se ela ainda não tiver reais.
  */
-export async function criarPilotoPadrao(contaId: number, nome: string, simbolo: string): Promise<number> {
+export async function criarPilotoPadrao(
+  contaId: number,
+  nome: string,
+  simbolo: string,
+  opcoes: { tempo?: string; intervaloMin?: number } = {},
+): Promise<number> {
   const t = novoToken(); // ninguém vê este token: o piloto não precisa dele; o painel gera outro se quiser webhook
   const [nova] = await query<{ id: number }>(
     `insert into estrategias (nome, conta_id, simbolo, ativa, real, token_hash, token_prefixo, valor_ordem, limite_por_ordem,
@@ -351,7 +375,7 @@ export async function criarPilotoPadrao(contaId: number, nome: string, simbolo: 
              'obrigatorio', 'agente', 'reprova', 0.6, false, $9,
              true, $10, $11, $12, $13, true, $14, $15, false) returning id`,
     [nome, contaId, simbolo, t.hash, t.prefixo, PADRAO.valor, PADRAO.intervalo_min_seg, PADRAO.desvio_max_pct,
-      PADRAO.ia_contexto, PADRAO.stop, PADRAO.alvo, PADRAO.protecao, PADRAO.recuo, PADRAO.tempo, PADRAO.intervalo_min],
+      PADRAO.ia_contexto, PADRAO.stop, PADRAO.alvo, PADRAO.protecao, PADRAO.recuo, opcoes.tempo ?? PADRAO.tempo, opcoes.intervaloMin ?? PADRAO.intervalo_min],
   );
   await query(
     `insert into saldos_simulados (conta_id, moeda, quantidade) values ($1, 'BRL', $2) on conflict (conta_id, moeda) do nothing`,

@@ -6,7 +6,9 @@ import { config } from '../config.js';
 import { cifrar, derivarChave, novoToken } from '../crypto.js';
 import { query, transacao, umOuNada } from '../db.js';
 import { corretoraReal, type Conta, type Estrategia } from '../motor.js';
-import { cotacaoPublica, exchangesSuportadas, mercadosDa, MT5, velasDiarias } from '../brokers/mercado.js';
+import { B3, cotacaoPublica, exchangesSuportadas, mercadosDa, MT5, velasDiarias } from '../brokers/mercado.js';
+import { confirmarAlerta, recusarAlerta } from '../assistente/index.js';
+import { desligarTelegram, enviar as enviarTelegram, lerTelegram, salvarToken } from '../assistente/telegram.js';
 import { criarPilotoPadrao } from '../piloto/index.js';
 import { moedas } from '../brokers/tipos.js';
 import { iniciarAnalise } from '../analise/index.js';
@@ -225,7 +227,8 @@ api.post('/contas', async (req, res) => {
   const d = validar(esquemaConta, req.body);
   if (!exchangesSuportadas().includes(d.exchange)) throw new ErroPedido(`exchange "${d.exchange}" não suportada`);
   const ehMt5 = d.exchange === MT5;
-  if (d.modo === 'real' && !ehMt5 && !(d.api_key && d.api_secret)) throw new ErroPedido('conta real precisa de chave e segredo da API');
+  const ehAssistida = d.exchange === B3;
+  if (d.modo === 'real' && !ehMt5 && !ehAssistida && !(d.api_key && d.api_secret)) throw new ErroPedido('conta real precisa de chave e segredo da API');
   // MetaTrader 5 (B3): sem chave de API; a ponte no Windows do dono se identifica com este token
   const ponte = ehMt5 ? novoToken() : null;
   const conta = await transacao(async (c) => {
@@ -234,10 +237,10 @@ api.post('/contas', async (req, res) => {
                            ponte_token_hash, ponte_token_prefixo)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning *`,
       [
-        d.nome, d.exchange, d.modo, ehMt5 ? false : d.testnet,
-        !ehMt5 && d.api_key ? cifrar(d.api_key, chave) : null,
-        !ehMt5 && d.api_secret ? cifrar(d.api_secret, chave) : null,
-        !ehMt5 && d.api_senha ? cifrar(d.api_senha, chave) : null,
+        d.nome, d.exchange, d.modo, ehMt5 || ehAssistida ? false : d.testnet,
+        !ehMt5 && !ehAssistida && d.api_key ? cifrar(d.api_key, chave) : null,
+        !ehMt5 && !ehAssistida && d.api_secret ? cifrar(d.api_secret, chave) : null,
+        !ehMt5 && !ehAssistida && d.api_senha ? cifrar(d.api_senha, chave) : null,
         d.taxa_simulada_pct,
         ponte?.hash ?? null,
         ponte?.prefixo ?? null,
@@ -252,6 +255,11 @@ api.post('/contas', async (req, res) => {
     return nova;
   });
   await evento(req.usuarioId, 'conta_criada', { conta: conta.id, exchange: conta.exchange, modo: conta.modo });
+  if (ehAssistida) {
+    // assistente: já sai uma estratégia em simulação, varrendo as ações em velas diárias
+    const estrategia = await criarPilotoPadrao(conta.id, `Assistente B3 (${conta.nome})`, 'PETR4/BRL', { tempo: '1d', intervaloMin: 10 });
+    return void res.status(201).json({ ...contaPublica(conta), estrategia_criada: estrategia });
+  }
   if (!ponte) return void res.status(201).json(contaPublica(conta));
   // na B3, já sai um piloto padrão em simulação varrendo as ações que a ponte acompanha
   const estrategia = await criarPilotoPadrao(conta.id, `Piloto B3 (${conta.nome})`, 'PETR4/BRL');
@@ -272,7 +280,7 @@ api.patch('/contas/:id', async (req, res) => {
   const novoSecret = d.apagar_chaves ? null : d.api_secret ? cifrar(d.api_secret, chave) : atual.api_secret_cifrada;
   const novaSenha = d.apagar_chaves ? null : d.api_senha ? cifrar(d.api_senha, chave) : atual.api_senha_cifrada;
   const modo = d.modo ?? atual.modo;
-  if (modo === 'real' && atual.exchange !== MT5 && !(novaKey && novoSecret)) throw new ErroPedido('conta real precisa de chave e segredo da API');
+  if (modo === 'real' && atual.exchange !== MT5 && atual.exchange !== B3 && !(novaKey && novoSecret)) throw new ErroPedido('conta real precisa de chave e segredo da API');
   if (modo === 'simulacao') {
     // conta voltou para simulação: nenhuma estratégia dela pode continuar marcada como real
     await query('update estrategias set real = false where conta_id = $1 and real', [contaId]);
@@ -475,6 +483,62 @@ api.patch('/estrategias/:id', async (req, res) => {
   );
   await evento(req.usuarioId, 'estrategia_alterada', { estrategia: estId, mudou: d });
   res.json({ ok: true });
+});
+
+// ------------------------------------------------------------------ assistente (Telegram e avisos)
+
+api.get('/telegram', async (_req, res) => {
+  const t = await lerTelegram();
+  res.json(t ? { configurado: true, bot: t.bot, pareado: Boolean(t.chat_id), codigo: t.codigo } : { configurado: false });
+});
+
+api.put('/telegram', async (req, res) => {
+  const { token } = validar(z.object({ token: z.string().trim().regex(/^\d{5,15}:[A-Za-z0-9_-]{20,80}$/, 'token do @BotFather no formato 123456:ABC…') }), req.body);
+  const r = await salvarToken(token).catch((e: Error) => {
+    throw new ErroPedido(e.message);
+  });
+  await evento(req.usuarioId, 'telegram_configurado', { bot: r.bot });
+  res.json({ configurado: true, bot: r.bot, pareado: false, codigo: r.codigo });
+});
+
+api.delete('/telegram', async (req, res) => {
+  await desligarTelegram();
+  await evento(req.usuarioId, 'telegram_desligado', {});
+  res.json({ configurado: false });
+});
+
+api.post('/telegram/testar', async (_req, res) => {
+  const msg = await enviarTelegram('🔔 Teste do Bot Financeiro: os avisos do assistente chegam aqui.').catch((e: Error) => {
+    throw new ErroPedido(e.message);
+  });
+  if (!msg) throw new ErroPedido('o Telegram ainda não está pareado: mande /start com o código para o seu bot');
+  res.json({ ok: true });
+});
+
+api.get('/alertas', async (req, res) => {
+  const f = validar(z.object({ limite: z.coerce.number().int().min(1).max(200).default(50) }), req.query);
+  res.json(
+    await query(
+      `select a.*, e.nome as estrategia from alertas a join estrategias e on e.id = a.estrategia_id
+        order by (a.situacao = 'pendente') desc, a.id desc limit $1`,
+      [f.limite],
+    ),
+  );
+});
+
+api.post('/alertas/:id/confirmar', async (req, res) => {
+  const d = validar(z.object({ preco: z.number().positive().optional(), quantidade: z.number().positive().optional() }), req.body ?? {});
+  const r = await confirmarAlerta(id(req), d);
+  if (!r.ok) throw new ErroPedido(r.texto);
+  await evento(req.usuarioId, 'alerta_confirmado', { alerta: id(req), ...d });
+  res.json(r);
+});
+
+api.post('/alertas/:id/recusar', async (req, res) => {
+  const r = await recusarAlerta(id(req));
+  if (!r.ok) throw new ErroPedido(r.texto);
+  await evento(req.usuarioId, 'alerta_recusado', { alerta: id(req) });
+  res.json(r);
 });
 
 /** Token novo da ponte MetaTrader 5; o antigo para de valer na hora. */

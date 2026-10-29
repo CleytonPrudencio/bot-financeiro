@@ -33,4 +33,8 @@ export const config = {
   fuso: 'America/Sao_Paulo',
   // serviço de previsão do Kronos (container bot-kronos); sem ele, o bot segue sem previsão
   kronosUrl: process.env.KRONOS_URL || null,
+  // gráfico público do Yahoo Finance: cotação e velas das ações da B3 do assistente (troca nos testes)
+  b3CotacoesUrl: process.env.B3_COTACOES_URL || 'https://query1.finance.yahoo.com',
+  // bot do Telegram fala com esta API (troca nos testes)
+  telegramUrl: process.env.TELEGRAM_API_URL || 'https://api.telegram.org',
 } as const;

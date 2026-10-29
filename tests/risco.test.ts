@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { avaliar, conferirSaida, consultaIa, decidirComIa, ipPermitido, PISO_PROTECAO, type EstadoRisco, type PoliticaIa } from '../src/risco.js';
+import { avaliar, conferirSaida, consultaIa, decidirComIa, deveAvisarStop, ipPermitido, PISO_PROTECAO, stopSugerido, type EstadoRisco, type PoliticaIa } from '../src/risco.js';
 import type { Sinal } from '../src/sinal.js';
 
 function estado(mudar: Partial<EstadoRisco> = {}, est: Partial<EstadoRisco['estrategia']> = {}): EstadoRisco {
@@ -199,5 +199,24 @@ describe('saída do piloto automático', () => {
     expect(conferirSaida(100, 103, 0, regras)).toEqual({ sair: false });
     expect(conferirSaida(0, 50, 0, regras)).toEqual({ sair: false });
     expect(conferirSaida(100, Number.NaN, 0, regras)).toEqual({ sair: false });
+  });
+});
+
+describe('stop sugerido para o dono registrar na corretora (assistente)', () => {
+  const regras = { stopPct: 3, alvoPct: 6, protecaoPct: 2.5, recuoPct: 1.5 };
+  it('antes da proteção, o stop de perda; depois, sobe com o topo e nunca fica no prejuízo', () => {
+    expect(stopSugerido(100, 101, regras)).toBeCloseTo(97);
+    expect(stopSugerido(100, 104, regras)).toBeCloseTo(104 * 0.985);
+    expect(stopSugerido(100, 102.5, { ...regras, recuoPct: 10 })).toBeCloseTo(100 * PISO_PROTECAO);
+  });
+  it('é o mesmo nível em que a saída dispara', () => {
+    const s = stopSugerido(100, 104, regras);
+    expect(conferirSaida(100, s + 0.01, 104, regras)).toEqual({ sair: false });
+    expect(conferirSaida(100, s, 104, regras)).toMatchObject({ sair: true, tipo: 'protecao' });
+  });
+  it('só avisa quando o stop sobe 0,5% ou mais sobre o último aviso', () => {
+    expect(deveAvisarStop(97.2, 97)).toBe(false);
+    expect(deveAvisarStop(98, 97)).toBe(true);
+    expect(deveAvisarStop(98, null)).toBe(false);
   });
 });
