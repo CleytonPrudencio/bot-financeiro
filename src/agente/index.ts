@@ -2,7 +2,7 @@ import type pg from 'pg';
 import { query } from '../db.js';
 import { logger } from '../logger.js';
 import { dadosDeMercado } from '../analise/index.js';
-import { chamarIa, mensagemDeErro, type ConectorIa, type PedidoParecer, type RespostaIa } from '../ia/index.js';
+import { chamarIa, mensagemDeErro, type ConectorIa, type PedidoParecer, type RespostaIa, type UsoWeb } from '../ia/index.js';
 import { ESQUEMA_PARECER, lerParecer } from '../ia/prompt.js';
 import { ESQUEMA_ETAPA, ETAPAS, ETAPAS_DE_APOIO, etapaDaPrevisao, lerEtapa, relatorios, sistemaDaEtapa, SISTEMA_DECISAO, type IdEtapa, type ResultadoEtapa } from './etapas.js';
 
@@ -19,7 +19,7 @@ export interface ConfigAgente {
 export const previsaoLigada = (config: ConfigAgente) => Boolean(config.etapas.previsao?.ligada);
 
 export type SaidaEtapa =
-  | { ok: true; conector: string; modelo: string; ms: number; web: boolean; resultado: ResultadoEtapa }
+  | { ok: true; conector: string; modelo: string; ms: number; web: boolean; buscas?: number; erro_busca?: string; resultado: ResultadoEtapa }
   | { ok: false; conector: string; modelo: string; ms: number; erro: string };
 
 export interface ResultadoAgente {
@@ -93,13 +93,18 @@ export async function rodarAgente({ pedido, dados, config, conectores, aoAtualiz
       const web = Boolean(e.usaWeb && config.etapas[e.id]?.web && c.provedor === 'anthropic');
       const t0 = Date.now();
       let saida: SaidaEtapa;
+      const uso: UsoWeb = { buscas: 0 };
       try {
         const resposta = await chamarIa(c, sistemaDaEtapa(e, web || /perplexity/.test(c.url_base ?? '')), texto, {
           esquema: ESQUEMA_ETAPA,
           pesquisaWeb: web,
-          timeoutSeg: web ? Math.max(c.timeout_seg, 60) : c.timeout_seg,
+          timeoutSeg: web ? Math.max(c.timeout_seg, 90) : c.timeout_seg,
+          uso,
         });
-        saida = { ok: true, conector: c.nome, modelo: c.modelo, ms: Date.now() - t0, web, resultado: lerEtapa(resposta) };
+        saida = {
+          ok: true, conector: c.nome, modelo: c.modelo, ms: Date.now() - t0, web, resultado: lerEtapa(resposta),
+          ...(web ? { buscas: uso.buscas, ...(uso.erroBusca ? { erro_busca: uso.erroBusca } : {}) } : {}),
+        };
       } catch (erro) {
         saida = { ok: false, conector: c.nome, modelo: c.modelo, ms: Date.now() - t0, erro: mensagemDeErro(c, erro) };
       }

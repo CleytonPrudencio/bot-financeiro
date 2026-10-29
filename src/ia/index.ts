@@ -1,13 +1,13 @@
 import { config } from '../config.js';
 import { decifrar, derivarChave } from '../crypto.js';
 import { logger } from '../logger.js';
-import { chamarClaude, MODELOS_CLAUDE } from './anthropic.js';
+import { chamarClaude, MODELOS_CLAUDE, type UsoWeb } from './anthropic.js';
 import { chamarCompativel, limparErro, PRESETS_COMPATIVEIS } from './compativel.js';
 import { ESQUEMA_PARECER, lerParecer, SISTEMA_PARECER, SISTEMA_PERGUNTA, textoDoPedido } from './prompt.js';
 import { ErroIa, type ConectorIa, type PedidoParecer, type RespostaIa } from './tipos.js';
 
 export { MODELOS_CLAUDE, PRESETS_COMPATIVEIS };
-export type { ConectorIa, PedidoParecer, RespostaIa };
+export type { ConectorIa, PedidoParecer, RespostaIa, UsoWeb };
 
 const chave = derivarChave(config.chaveCifra);
 
@@ -21,6 +21,8 @@ export interface OpcoesChamada {
   /** pesquisa na web (só Claude) */
   pesquisaWeb?: boolean;
   timeoutSeg?: number;
+  /** só Claude: preenchido com as buscas na web que o modelo fez de fato */
+  uso?: UsoWeb;
 }
 
 /** Chama um conector qualquer e devolve o texto da resposta. Lança ErroIa. */

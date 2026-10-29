@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { afinidade, etapaDaPrevisao, lerEtapa, montarAutomatico, relatorios, type ConectorResumido } from '../src/agente/etapas.js';
+import { afinidade, ETAPAS, etapaDaPrevisao, lerEtapa, montarAutomatico, relatorios, sistemaDaEtapa, type ConectorResumido } from '../src/agente/etapas.js';
 
 const conector = (id: number, provedor: 'anthropic' | 'openai', modelo: string, url_base: string | null = null): ConectorResumido => ({ id, provedor, modelo, url_base, ativo: true });
 
@@ -23,6 +23,28 @@ describe('relatórios para a decisão', () => {
     expect(t).toContain('- hack');
     expect(t).toContain('## Risco (DeepSeek): FALHOU (tempo esgotado)');
     expect(t).toContain('## Sentimento: desligada');
+  });
+  it('avisa a decisão quando a etapa devia pesquisar na web e não pesquisou', () => {
+    const r = { vies: 'neutro' as const, nota: 50, resumo: 'sem notícias', pontos: [] };
+    const t = relatorios({
+      pesquisa: { ok: true, conector: 'Claude', web: true, buscas: 0, resultado: r },
+      sentimento: { ok: true, conector: 'Claude', web: true, buscas: 2, resultado: r },
+    });
+    expect(t).toContain('## Pesquisa (Claude): neutro, nota 50/100 (devia pesquisar na web e não pesquisou');
+    expect(t).toContain('## Sentimento (Claude): neutro, nota 50/100\n');
+  });
+});
+
+describe('pedido de cada etapa', () => {
+  const pesquisa = ETAPAS.find((e) => e.id === 'pesquisa')!;
+  it('com web: leva a data de hoje e manda fazer pelo menos uma busca', () => {
+    const s = sistemaDaEtapa(pesquisa, true, new Date('2026-10-29T15:00:00Z'));
+    expect(s).toContain('Hoje é 29/10/2026');
+    expect(s).toContain('pelo menos uma busca');
+    expect(s).not.toContain('não tem internet');
+  });
+  it('sem web: diz que não tem internet', () => {
+    expect(sistemaDaEtapa(pesquisa, false)).toContain('não tem internet');
   });
 });
 

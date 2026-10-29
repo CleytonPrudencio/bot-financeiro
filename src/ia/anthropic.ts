@@ -24,12 +24,21 @@ export interface OpcoesClaude {
   pesquisaWeb?: boolean;
   /** Tempo máximo em segundos; padrão: o do conector. */
   timeoutSeg?: number;
+  /** Preenchido na volta: quantas buscas na web o modelo fez de fato e, se alguma falhou, o motivo. */
+  uso?: UsoWeb;
+}
+
+export interface UsoWeb {
+  buscas: number;
+  erroBusca?: string;
 }
 
 export async function chamarClaude(c: ConectorIa, apiKey: string, sistema: string, texto: string, op: OpcoesClaude = {}): Promise<string> {
   const cliente = new Anthropic({ apiKey, timeout: (op.timeoutSeg ?? c.timeout_seg) * 1000, maxRetries: 0 });
   const mensagens: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: texto }];
   let r;
+  let buscas = 0;
+  let erroBusca: string | undefined;
   // a pesquisa na web pode pausar o turno (pause_turn): devolve o turno para o servidor continuar
   for (let volta = 0; volta < 4; volta++) {
     try {
@@ -49,9 +58,14 @@ export async function chamarClaude(c: ConectorIa, apiKey: string, sistema: strin
     } catch (e) {
       throw new ErroIa(erroClaude(e));
     }
+    buscas += r.usage?.server_tool_use?.web_search_requests ?? 0;
+    for (const b of r.content) {
+      if (b.type === 'web_search_tool_result' && !Array.isArray(b.content) && b.content.type === 'web_search_tool_result_error') erroBusca = b.content.error_code;
+    }
     if (r.stop_reason !== 'pause_turn') break;
     mensagens.push({ role: 'assistant', content: r.content });
   }
+  if (op.uso) Object.assign(op.uso, { buscas, erroBusca });
   if (!r || r.stop_reason === 'pause_turn') throw new ErroIa('a pesquisa na web não terminou a tempo');
   if (r.stop_reason === 'refusal') throw new ErroIa('o modelo recusou responder');
   if (r.stop_reason === 'max_tokens') throw new ErroIa('resposta cortada no limite de tokens');

@@ -22,10 +22,18 @@ function cartaoResultado(etapa, saida) {
   const r = saida.resultado;
   const [texto, classe] = VIES[r.vies] ?? VIES.neutro;
   return h('div', { class: 'etapa-saida' },
-    h('div', { class: 'etapa-saida-topo' }, selo(texto, classe), h('span', { class: 'mono suave' }, `${r.nota}/100 · ${(saida.ms / 1000).toFixed(1)} s${saida.web ? ' · web' : ''}`)),
+    h('div', { class: 'etapa-saida-topo' }, selo(texto, classe), h('span', { class: 'mono suave' }, `${r.nota}/100 · ${(saida.ms / 1000).toFixed(1)} s${saida.web ? ` · ${textoBuscas(saida)}` : ''}`)),
+    saida.web && saida.erro_busca ? h('p', { class: 'pequeno-texto perigo-txt' }, `a pesquisa na web falhou (${saida.erro_busca})`) : null,
     h('div', { class: 'uso-trilho' }, h('div', { class: `uso-barra uso-${r.nota >= 60 ? 'ok' : r.nota >= 40 ? 'alerta' : 'perigo'}`, estilo: { '--fr': String(r.nota / 100) } })),
     h('p', { class: 'pequeno-texto' }, r.resumo),
     r.pontos.length ? h('ul', { class: 'agente-pontos' }, r.pontos.map((x) => h('li', {}, x))) : null);
+}
+
+/** Quantas buscas o modelo fez de fato (execuções antigas não guardavam o número). */
+function textoBuscas(saida) {
+  if (saida.buscas === undefined) return 'web';
+  if (!saida.buscas) return 'web: nenhuma busca';
+  return `web: ${saida.buscas} ${saida.buscas === 1 ? 'busca' : 'buscas'}`;
 }
 
 /** A esteira desenhada: quatro etapas lado a lado, setas e a decisão no fim. */
