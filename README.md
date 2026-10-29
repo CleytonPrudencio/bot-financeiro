@@ -189,6 +189,17 @@ Nenhuma regra garante lucro: o stop limita a perda de cada operação, não evit
 
 ## Escritório virtual
 
+A página tem dois modos (botões no topo; o padrão é **Ao vivo**):
+
+- **Ao vivo** (`public/escritorio/aovivo.js` + `GET /api/escritorio`, que só lê): um robô para cada
+  **estratégia sua**, com a cotação real e as velas diárias da exchange no monitor. As estratégias
+  ativas trabalham na mesa; as paradas descansam (ligar e desligar continua em Estratégias). A cada
+  15 s o painel busca os últimos sinais: cada sinal novo (do piloto ou do webhook) vira uma reunião
+  com o chefe, a lista do holograma mostra as etapas do agente e o motivo das regras, e o carimbo é
+  a decisão que o bot **tomou de verdade** (executado → aprovado; rejeitado → reprovado, com o motivo).
+  O cartão de cada robô mostra posição, modo (real ou simulação) e a situação do piloto.
+- **Demonstração**: o escritório original, com dados fictícios, descrito abaixo.
+
 Página **Escritório** do painel: um escritório animado (Canvas, sem biblioteca) com **um robô
 analista para cada mercado** — cripto (Bitcoin, Ethereum, Solana, XRP), B3 (Petrobras, Vale,
 Ibovespa), câmbio (Dólar, Euro), commodities (Ouro, Petróleo Brent) e bolsa americana (S&P 500) —,

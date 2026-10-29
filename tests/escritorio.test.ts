@@ -134,3 +134,51 @@ describe('mercado fictício', () => {
     expect(a.aberto(a.ativos.find((x: { id: string }) => x.id === 'btc'))).toBe(true);
   });
 });
+
+// @ts-expect-error módulo JS do painel, sem tipos
+import { carteiraDa, criarMercadoReal, propostaDoSinal, visualDa } from '../public/escritorio/aovivo.js';
+
+describe('escritório ao vivo', () => {
+  const estrategia = {
+    id: 4, nome: 'Piloto BTC/BRL (padrão)', simbolo: 'BTC/BRL', exchange: 'binance', ativa: true, auto_ligado: true,
+    posicao: 0.0001, custo_posicao: 50, preco: 520_000, abertura_hoje: 500_000,
+    fechamentos: Array.from({ length: 80 }, (_, i) => 400_000 + i * 1000),
+  };
+
+  it('cada estratégia vira um ativo com preço real, variação do dia e médias', () => {
+    const m = criarMercadoReal({ estrategias: [estrategia] });
+    const a = m.ativos[0];
+    expect(a).toMatchObject({ estrategiaId: 4, simbolo: 'BTC/BRL', moeda: 'R$', preco: 520_000, semCotacao: false });
+    expect(a.variacaoDia).toBeCloseTo(0.04);
+    expect(a.historico).toHaveLength(81);
+    expect(a.medias[60].at(-1)).not.toBeNull();
+    // sem cotação agora: fica a última conhecida
+    m.atualizar({ estrategias: [{ ...estrategia, preco: null }] });
+    expect(m.ativos[0].preco).toBe(520_000);
+    expect(visualDa('BTC/BRL').simbolo).toBe('₿');
+    expect(carteiraDa(estrategia, {}).precoEntrada).toBeCloseTo(500_000);
+  });
+
+  it('a reunião encena o que o bot decidiu: agente barrou', () => {
+    const ativo = criarMercadoReal({ estrategias: [estrategia] }).ativos[0];
+    const p = propostaDoSinal({
+      id: 7, acao: 'comprar', situacao: 'rejeitado', motivo: 'IA barrou: 0 aprovaram, 1 vetaram', ip: 'piloto',
+      id_externo: 'piloto-entrada-123', recebido_em: '2026-10-29T18:00:00Z', ordem: null, pareceres: [],
+      agente: { confianca: 0.7, etapas: { tecnica: { ok: true, resultado: { vies: 'contra', nota: 33 } }, previsao: { ok: true, resultado: { vies: 'contra', nota: 13 } } } },
+    }, ativo);
+    expect(p).toMatchObject({ real: true, lado: 'compra', motivo: 'virada para alta (piloto)', decisao: { aprovado: false } });
+    expect(p.verificacao.itens.map((i: { texto: string }) => i.texto)).toEqual([
+      'Origem: Piloto automático', 'Kronos: contra (13/100)', 'Técnica: contra (33/100)', 'Barrado: IA barrou: 0 aprovaram, 1 veta…', // cortado para caber no holograma
+    ]);
+    expect(p.falaChefe).toContain('Não agora');
+  });
+
+  it('ordem executada: aprovado, com o modo e o preço da ordem', () => {
+    const ativo = criarMercadoReal({ estrategias: [estrategia] }).ativos[0];
+    const p = propostaDoSinal({
+      id: 8, acao: 'zerar', situacao: 'executado', motivo: null, ip: 'piloto', id_externo: 'piloto-stop-1',
+      recebido_em: '2026-10-29T18:00:00Z', agente: null, pareceres: [], ordem: { lado: 'venda', modo: 'real', preco: 504_400, custo: 50 },
+    }, ativo);
+    expect(p).toMatchObject({ lado: 'venda', urgente: true, preco: 504_400, motivo: 'stop de perda (piloto)', decisao: { aprovado: true, motivo: 'ordem REAL executada' } });
+  });
+});

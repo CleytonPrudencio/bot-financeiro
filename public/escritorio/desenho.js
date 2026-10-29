@@ -1079,7 +1079,7 @@ export function desenharHolograma(ctx, reuniao, t, ativo) {
       ctx.fillStyle = '#bff6ff';
       ctx.font = '600 12px system-ui, sans-serif';
       ctx.fillText(
-        `analista ${Math.round(p.confianca * 100)}% · chefe ${Math.round(reuniao.verificacao.nota * 100)}% · juntos ${Math.round(reuniao.decisao.combinada * 100)}%`,
+        reuniao.rodape ?? `analista ${Math.round(p.confianca * 100)}% · chefe ${Math.round(reuniao.verificacao.nota * 100)}% · juntos ${Math.round(reuniao.decisao.combinada * 100)}%`,
         x + 12,
         y + h - 14,
       );

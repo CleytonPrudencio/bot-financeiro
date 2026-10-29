@@ -6,7 +6,7 @@ import { config } from '../config.js';
 import { cifrar, derivarChave, novoToken } from '../crypto.js';
 import { query, transacao, umOuNada } from '../db.js';
 import { corretoraReal, type Conta, type Estrategia } from '../motor.js';
-import { cotacaoPublica, exchangePublica, exchangesSuportadas } from '../brokers/ccxt.js';
+import { cotacaoPublica, exchangePublica, exchangesSuportadas, velasDiarias } from '../brokers/ccxt.js';
 import { moedas } from '../brokers/tipos.js';
 import { iniciarAnalise } from '../analise/index.js';
 import { agentePronto, iniciarTeste, lerConfig, salvarConfig, type ConfigAgente } from '../agente/index.js';
@@ -454,6 +454,62 @@ api.get('/estrategias/:id/cotacao', async (req, res) => {
   );
   if (!e) return void res.status(404).json({ erro: 'estratégia não existe' });
   res.json({ simbolo: e.simbolo, cotacao: await cotacaoPublica(e.exchange, e.simbolo) });
+});
+
+// ------------------------------------------------------------------ escritório ao vivo
+//
+// O escritório virtual mostra o bot de verdade: um robô por estratégia, com a cotação real, as velas
+// diárias (para o monitor da mesa) e os últimos sinais (cada um vira uma reunião com o chefe). Só lê.
+
+const velasCache = new Map<string, { ate: number; velas: Promise<{ t: number; abre: number; fecha: number }[]> }>();
+function velasComCache(exchange: string, simbolo: string) {
+  const chave = `${exchange}|${simbolo}`;
+  const atual = velasCache.get(chave);
+  if (atual && atual.ate > Date.now()) return atual.velas;
+  const velas = velasDiarias(exchange, simbolo, 130);
+  velasCache.set(chave, { ate: Date.now() + 30 * 60_000, velas });
+  velas.catch(() => velasCache.delete(chave));
+  return velas;
+}
+
+api.get('/escritorio', async (_req, res) => {
+  const estrategias = await query<{
+    id: number; nome: string; simbolo: string; exchange: string; ativa: boolean; real: boolean; conta_modo: string;
+    auto_ligado: boolean; auto_situacao: string | null; auto_checado_em: Date | null; ia_modo: string; ia_tipo: string;
+    valor_ordem: number; posicao: number; custo_posicao: number;
+  }>(
+    `select e.id, e.nome, e.simbolo, c.exchange, e.ativa, e.real, c.modo as conta_modo, e.auto_ligado, e.auto_situacao,
+            e.auto_checado_em, e.ia_modo, e.ia_tipo, e.valor_ordem,
+            coalesce(p.quantidade, 0) as posicao, coalesce(p.custo_total, 0) as custo_posicao
+       from estrategias e join contas c on c.id = e.conta_id left join posicoes p on p.estrategia_id = e.id
+      order by e.ativa desc, e.id`,
+  );
+  const comMercado = await Promise.all(
+    estrategias.map(async (e) => {
+      const [preco, velas] = await Promise.allSettled([cotacaoPublica(e.exchange, e.simbolo), velasComCache(e.exchange, e.simbolo)]);
+      const lista = velas.status === 'fulfilled' ? velas.value : [];
+      return {
+        ...e,
+        operando_real: e.real && e.conta_modo === 'real' && config.realLiberadoNoServidor,
+        preco: preco.status === 'fulfilled' ? preco.value : null,
+        abertura_hoje: lista[lista.length - 1]?.abre ?? null,
+        fechamentos: lista.slice(0, -1).map((v) => v.fecha),
+      };
+    }),
+  );
+  const sinais = await query(
+    `select s.id, s.estrategia_id, s.acao, s.situacao, s.motivo, s.ip, s.recebido_em, s.corpo->>'id' as id_externo,
+            (select json_build_object('etapas', a.etapas, 'decisao', a.decisao, 'confianca', a.confianca, 'motivo', a.motivo)
+               from agente_execucoes a where a.sinal_id = s.id limit 1) as agente,
+            (select coalesce(json_agg(json_build_object('conector', p.conector_nome, 'decisao', p.decisao, 'confianca', p.confianca,
+                                                         'erro', p.erro) order by p.id), '[]'::json)
+               from pareceres_ia p where p.sinal_id = s.id) as pareceres,
+            (select json_build_object('lado', o.lado, 'modo', o.modo, 'preco', o.preco_medio, 'custo', o.custo, 'quantidade', o.quantidade)
+               from ordens o where o.sinal_id = s.id and o.situacao = 'executada' limit 1) as ordem
+       from sinais s where s.estrategia_id is not null
+      order by s.id desc limit 30`,
+  );
+  res.json({ real_no_servidor: config.realLiberadoNoServidor, estrategias: comMercado, sinais });
 });
 
 // ------------------------------------------------------------------ histórico

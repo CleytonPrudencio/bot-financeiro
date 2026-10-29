@@ -1,12 +1,18 @@
 // Escritório virtual: cada robô analista cuida de um mercado na sua mesa; quando vê um sinal, leva
 // a proposta até o chefe, que confere de novo; os dois decidem juntos e, se aprovado, o analista
-// volta e executa. Tudo com dados FICTÍCIOS (mercado.js): nenhuma ordem sai daqui.
+// volta e executa. Dois modos:
+//   - demonstração: dados FICTÍCIOS (mercado.js), os robôs decidem sozinhos; nenhuma ordem sai daqui;
+//   - ao vivo (`opcoes.aoVivo`): cada robô é uma estratégia do bot, com preço real, e cada sinal que o
+//     bot recebeu vira uma reunião que encena a decisão que o bot tomou de verdade (aovivo.js). Só lê.
 //
-//   const escritorio = montarEscritorio(elemento); ...; escritorio.parar();
+//   const escritorio = montarEscritorio(elemento, { aoVivo: { dados, buscar, agora } }); ...; escritorio.parar();
 
 import { CATEGORIAS, criarMercadoFicticio, formatarPreco, ifr, aleatorio } from './mercado.js';
 import { analisar, aplicarConselho, decidirJuntos, executar, novaCarteira, verificarChefe, VALOR_POR_ORDEM } from './decisao.js';
 import * as D from './desenho.js';
+import { carteiraDa, criarMercadoReal, horaDoSinal, propostaDoSinal, visualDa } from './aovivo.js';
+
+const INTERVALO_AO_VIVO_MS = 15_000;
 
 const PASSO_MERCADO = 0.25; // segundos (já com a velocidade) por passo do mercado
 const CORREDOR_Y = 520;
@@ -85,7 +91,11 @@ const pct = (x) => `${Math.round(x * 100)}%`;
 
 export function montarEscritorio(raiz, opcoes = {}) {
   const reduzido = opcoes.reduzido ?? window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-  const mercado = criarMercadoFicticio(opcoes.semente ?? Date.now());
+  const aoVivo = opcoes.aoVivo ?? null;
+  const mercado = aoVivo ? criarMercadoReal(aoVivo.dados) : criarMercadoFicticio(opcoes.semente ?? Date.now());
+  if (aoVivo?.agora) mercado.usarRelogio(aoVivo.agora);
+  let ultimoSinal = 0;
+  let buscaId = 0;
   const predios = D.gerarPredios(aleatorio(7));
 
   let tempo = 0;
@@ -104,7 +114,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
 
   // ---------------------------------------------------------------- robôs
 
-  const escalaInicial = new Set(lerEscala());
+  const escalaInicial = new Set(aoVivo ? mercado.ativos.filter((a) => a.estrategia.ativa).map((a) => a.id) : lerEscala());
   const vagaLivre = () => D.VAGAS_MESA.findIndex((_, i) => !robos.some((r) => r.vaga === i));
   /** Lugar livre na sala de descanso; prefere o lado da mesa de onde o robô sai. */
   function lugarLivre(ladoPreferido) {
@@ -119,12 +129,13 @@ export function montarEscritorio(raiz, opcoes = {}) {
 
   const robos = [];
   mercado.ativos.forEach((ativo, i) => {
-    const v = VISUAL[ativo.id];
+    const v = aoVivo ? visualDa(ativo.simbolo, i) : VISUAL[ativo.id];
     const r = {
       id: ativo.id,
-      nome: ativo.nome,
+      nome: aoVivo ? ativo.simbolo.split('/')[0] : ativo.nome,
       ativo,
-      carteira: novaCarteira(),
+      carteira: aoVivo ? carteiraDa(ativo.estrategia, novaCarteira()) : novaCarteira(),
+      filaSinais: [],
       vaga: null,
       descanso: null,
       casa: null,
@@ -308,7 +319,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
       falar(r, 'Termino esta e já saio de folga.', 1.8);
       return;
     }
-    if (r.carteira.quantidade > 0) zerarParaDescansar(r);
+    if (!aoVivo && r.carteira.quantidade > 0) zerarParaDescansar(r);
     r.descanso = lugarLivre(D.VAGAS_MESA[r.vaga].x < 640 ? 'esq' : 'dir');
     const caminho = caminhoAteDescanso(r);
     r.vaga = null;
@@ -341,10 +352,12 @@ export function montarEscritorio(raiz, opcoes = {}) {
     falar(r, `Zerei ${r.ativo.simbolo} antes da folga: ${resultado >= 0 ? '+' : ''}${resultado.toFixed(2)}.`, 2.2);
   }
 
-  const lembrarEscala = () => salvarEscala(robos.filter((r) => naMesa(r) && !r.folgaPedida).map((r) => r.id));
+  const lembrarEscala = () => !aoVivo && salvarEscala(robos.filter((r) => naMesa(r) && !r.folgaPedida).map((r) => r.id));
+  const AVISO_AO_VIVO = 'Ao vivo, quem trabalha são as estratégias ativas: ligue ou desligue em Estratégias.';
 
   /** Põe para trabalhar exatamente estes robôs (até onde houver mesa) e manda os outros descansar. */
   function aplicarEscala(ids) {
+    if (aoVivo) return avisoEscala(AVISO_AO_VIVO);
     const alvo = new Set(ids);
     for (const r of robos) if (!alvo.has(r.id)) dispensar(r);
     const semMesa = robos.filter((r) => alvo.has(r.id) && !escalar(r));
@@ -355,6 +368,10 @@ export function montarEscritorio(raiz, opcoes = {}) {
 
   /** Liga ou desliga um robô (botão da escala ou do cartão). */
   function alternarRobo(r) {
+    if (aoVivo) {
+      avisoEscala(AVISO_AO_VIVO);
+      return;
+    }
     if (r.folgaPedida) r.folgaPedida = false;
     else if (naMesa(r)) dispensar(r);
     else if (!escalar(r)) {
@@ -414,7 +431,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
     r.flash = { texto: `SINAL: ${lado}`, cor: 'rgba(255, 209, 102, ALFA)', ate: tempo + 1.4, duracao: 1.4 };
     falar(r, proposta.urgente ? `${proposta.motivo}! Preciso falar com o chefe.` : `Opa, sinal de ${lado.toLowerCase()} em ${r.ativo.simbolo}.`, 1.8);
     r.respostasIa = undefined;
-    r.consultaIa = conselhoLigado
+    r.consultaIa = conselhoLigado && !proposta.real
       ? opcoes
           .consultarIa({
             simbolo: r.ativo.simbolo,
@@ -480,8 +497,9 @@ export function montarEscritorio(raiz, opcoes = {}) {
       return;
     }
     const p = r.proposta;
-    const verificacao = verificarChefe(p, r.ativo, r.carteira, posicoesAbertas());
-    const decisao = aplicarConselho(decidirJuntos(p, verificacao), r.respostasIa, !p.urgente);
+    // ao vivo, a decisão é a que o bot tomou: a reunião só encena
+    const verificacao = p.real ? p.verificacao : verificarChefe(p, r.ativo, r.carteira, posicoesAbertas());
+    const decisao = p.real ? p.decisao : aplicarConselho(decidirJuntos(p, verificacao), r.respostasIa, !p.urgente);
     // linha do tempo da reunião (segundos desde o começo): o analista fala, o holograma abre, os
     // itens do chefe aparecem um a um, as notas, o carimbo e o holograma fecha antes das respostas
     const itens = 2.9;
@@ -489,7 +507,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
     const notas = itens + verificacao.itens.length * passo + 0.3;
     const carimbo = notas + 0.7;
     const tempos = { abrir: 2.2, itens, passo, notas, carimbo, fechar: carimbo + 1.5 };
-    const reuniao = { robo: r, proposta: p, verificacao, decisao, desde: tempo, tempos };
+    const reuniao = { robo: r, proposta: p, verificacao, decisao, desde: tempo, tempos, rodape: p.rodape };
     chefe.reuniao = reuniao;
     chefe.emocao = 'pensando';
     chefe.olharX = -0.9;
@@ -497,7 +515,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
     const lado = p.lado === 'compra' ? 'COMPRA' : 'VENDA';
     falar(
       r,
-      `Proposta: ${lado} ${r.ativo.simbolo} a ${formatarPreco(r.ativo, p.preco)}.\n${p.motivo}. Confiança ${pct(p.confianca)}.`,
+      `Proposta: ${lado} ${r.ativo.simbolo} a ${formatarPreco(r.ativo, p.preco)}.\n${p.motivo}.${p.real ? '' : ` Confiança ${pct(p.confianca)}.`}`,
       2.1,
       { deslocX: -110 },
     );
@@ -506,6 +524,10 @@ export function montarEscritorio(raiz, opcoes = {}) {
     const tCarimbo = tempos.carimbo;
     agendar(chefe, tNotas, () => {
       const c = decisao.conselho;
+      if (p.real) {
+        const aFavor = verificacao.itens.filter((i) => i.ok).length;
+        return falar(chefe, `Conferi: ${aFavor} de ${verificacao.itens.length} a favor.`, 1.8, { deslocX: 120 });
+      }
       falar(chefe, `Minha nota: ${pct(verificacao.nota)}. Juntos: ${pct(decisao.combinada)}.${c ? `\nIAs: ${c.aprovacoes} a favor, ${c.vetos} contra.` : ''}`, 1.8, { deslocX: 120 });
     });
     agendar(chefe, tCarimbo, () => {
@@ -518,7 +540,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
       }
     });
     agendar(chefe, tCarimbo + 0.9, () => {
-      falar(chefe, decisao.aprovado ? 'Aprovado. Pode executar.' : `Não agora: ${decisao.motivo}.`, 1.9, { deslocX: 120 });
+      falar(chefe, p.real ? p.falaChefe : decisao.aprovado ? 'Aprovado. Pode executar.' : `Não agora: ${decisao.motivo}.`, 2.4, { deslocX: 120 });
     });
     agendar(chefe, tempos.fechar + 0.4, () => {
       falar(r, decisao.aprovado ? 'Deixa comigo!' : 'Entendido, fica pra próxima.', 1.5, { deslocX: -110 });
@@ -548,17 +570,19 @@ export function montarEscritorio(raiz, opcoes = {}) {
     const p = r.proposta;
     const d = r.decisao;
     if (d?.aprovado) {
-      const preco = r.ativo.preco;
-      const { resultado } = executar(r.carteira, p.lado, preco);
+      // ao vivo, a ordem já foi executada pelo bot: aqui só se mostra (a posição vem do servidor)
+      const preco = p.real ? p.preco : r.ativo.preco;
+      const { resultado } = p.real ? { resultado: Number.NaN } : executar(r.carteira, p.lado, preco);
       r.carteira.aprovadas++;
       const lado = p.lado === 'compra' ? 'COMPRADO' : 'VENDIDO';
       r.flash = { texto: lado, cor: 'rgba(61, 220, 132, ALFA)', ate: tempo + 1.6, duracao: 1.6 };
       const mesa = D.VAGAS_MESA[r.vaga];
       const monitorX = mesa.x - r.lado * 38 * D.escalaEm(mesa.y);
-      if (p.lado === 'venda' && resultado > 0) soltarParticulas(monitorX, mesa.y - 120, 'moeda', 14);
+      if (p.lado === 'venda' && (resultado > 0 || (p.real && p.preco > r.carteira.precoEntrada))) soltarParticulas(monitorX, mesa.y - 120, 'moeda', 14);
       else soltarParticulas(monitorX, mesa.y - 120, 'faisca', 16, p.lado === 'venda' ? '#ff9f68' : '#3ddc84');
-      const texto =
-        p.lado === 'compra'
+      const texto = p.real
+        ? `${p.lado === 'compra' ? 'Comprei' : 'Vendi'} a ${formatarPreco(r.ativo, preco)} (${p.ordem?.modo === 'real' ? 'ordem real' : 'simulação'}).`
+        : p.lado === 'compra'
           ? `Comprei a ${formatarPreco(r.ativo, preco)}.`
           : `Vendi a ${formatarPreco(r.ativo, preco)}: ${resultado >= 0 ? 'lucro' : 'prejuízo'} de ${formatarPreco({ ...r.ativo, casas: 2 }, Math.abs(resultado))}.`;
       falar(r, texto, 2.4);
@@ -580,6 +604,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
   }
 
   function forcarSinal(r) {
+    if (aoVivo) return;
     if (r.estado !== 'trabalhando') {
       falar(r, r.estado === 'dormindo' ? 'O mercado está fechado agora.' : r.estado === 'folga' ? 'Estou de folga hoje!' : 'Já estou ocupado!', 1.6);
       return;
@@ -599,6 +624,11 @@ export function montarEscritorio(raiz, opcoes = {}) {
 
   function passoMercado() {
     mercado.avancar();
+    if (aoVivo) {
+      // ao vivo ninguém inventa sinal: o robô leva ao chefe os sinais que o bot recebeu
+      for (const r of robos) if (r.estado === 'trabalhando' && r.filaSinais.length) iniciarProposta(r, r.filaSinais.shift());
+      return;
+    }
     for (const r of robos) {
       const aberto = mercado.aberto(r.ativo);
       if (r.estado === 'dormindo' && aberto) {
@@ -641,6 +671,17 @@ export function montarEscritorio(raiz, opcoes = {}) {
     const r = livres[Math.floor(mercado.rand() * livres.length)];
     const indice = ifr(r.ativo.historico);
     const v = r.ativo.variacaoDia * 100;
+    if (aoVivo) {
+      const e = r.ativo.estrategia;
+      const frasesReais = [
+        `${r.ativo.simbolo} ${v >= 0 ? '+' : ''}${v.toFixed(2)}% hoje.`,
+        indice === null ? 'Lendo as velas…' : `IFR diário em ${indice.toFixed(0)}.`,
+        r.carteira.quantidade > 0 ? `Posição aberta desde ${formatarPreco(r.ativo, r.carteira.precoEntrada)}.` : e.auto_ligado ? 'Sem posição. O piloto espera a virada.' : 'Sem posição. Esperando sinal do webhook.',
+      ];
+      if (e.auto_ligado && e.auto_situacao) frasesReais.push(`Piloto: ${e.auto_situacao.length > 90 ? `${e.auto_situacao.slice(0, 89)}…` : e.auto_situacao}`);
+      falar(r, frasesReais[Math.floor(mercado.rand() * frasesReais.length)], 2.8);
+      return;
+    }
     const frases = [
       `${r.ativo.simbolo} ${v >= 0 ? '+' : ''}${v.toFixed(2)}% hoje.`,
       indice > 65 ? `IFR em ${indice.toFixed(0)}: está esticado.` : indice < 35 ? `IFR em ${indice.toFixed(0)}: vendido demais.` : `IFR em ${indice.toFixed(0)}, nada de mais.`,
@@ -685,7 +726,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
   function registrar(reuniao) {
     const r = reuniao.robo;
     const entrada = {
-      hora: `dia ${mercado.relogio.dia} · ${mercado.horaTexto()}`,
+      hora: reuniao.proposta.real ? horaDoSinal({ recebido_em: reuniao.proposta.quando }) : `dia ${mercado.relogio.dia} · ${mercado.horaTexto()}`,
       robo: r,
       proposta: reuniao.proposta,
       verificacao: reuniao.verificacao,
@@ -733,13 +774,13 @@ export function montarEscritorio(raiz, opcoes = {}) {
   const painelEscala = h(
     'section',
     { class: 'escala' },
-    h('div', { class: 'escritorio-cartao-topo' }, h('strong', {}, 'Escala de hoje'), contador),
-    h('div', { class: 'acoes' }, ATALHOS.map(([nome, quem]) => h('button', { class: 'pequeno secundario', onclick: () => aplicarEscala(quem().map((r) => r.id)) }, nome))),
-    CATEGORIAS.map((cat) =>
+    h('div', { class: 'escritorio-cartao-topo' }, h('strong', {}, aoVivo ? 'Quem está trabalhando' : 'Escala de hoje'), contador),
+    aoVivo ? null : h('div', { class: 'acoes' }, ATALHOS.map(([nome, quem]) => h('button', { class: 'pequeno secundario', onclick: () => aplicarEscala(quem().map((r) => r.id)) }, nome))),
+    (aoVivo ? [{ id: 'real', nome: 'Suas estratégias (ativas na mesa)' }] : CATEGORIAS).map((cat) =>
       h('div', { class: 'escala-grupo' },
         h('span', { class: 'rotulo' }, cat.nome),
         h('div', { class: 'escala-robos' }, robos.filter((r) => r.ativo.categoria === cat.id).map((r) => {
-          const b = h('button', { class: 'escala-robo', title: `${r.nome} · ${r.ativo.simbolo}`, onclick: () => alternarRobo(r) }, h('i', {}), r.nome);
+          const b = h('button', { class: 'escala-robo', title: `${aoVivo ? r.ativo.nome : r.nome} · ${r.ativo.simbolo}`, onclick: () => alternarRobo(r) }, h('i', {}), aoVivo ? r.ativo.nome : r.nome);
           b.style.setProperty('--cor', r.cor);
           botoesRobo.set(r, b);
           return b;
@@ -768,8 +809,10 @@ export function montarEscritorio(raiz, opcoes = {}) {
     'aside',
     { class: 'escritorio-lado' },
     h('div', { class: 'acoes' }, botaoPausa, ...botoesVel, botaoTela),
-    h('p', { class: 'rotulo' }, 'Dados fictícios: nenhuma ordem de verdade sai desta tela. Escolha quem trabalha hoje; quem fica de folga vai para a sala de descanso. Clique num robô para ver os detalhes.'),
-    podeConselho
+    aoVivo
+      ? h('p', { class: 'rotulo' }, 'Ao vivo: cada robô é uma estratégia sua, com o preço real da exchange. As ativas trabalham na mesa; as paradas descansam. Cada sinal que o bot recebe vira uma reunião com o chefe, e o carimbo mostra o que o bot decidiu de verdade. Esta tela só mostra: as ordens saem pelo bot.')
+      : h('p', { class: 'rotulo' }, 'Dados fictícios: nenhuma ordem de verdade sai desta tela. Escolha quem trabalha hoje; quem fica de folga vai para a sala de descanso. Clique num robô para ver os detalhes.'),
+    podeConselho && !aoVivo
       ? h('label', { class: 'interruptor escritorio-conselho-botao' },
           h('input', { type: 'checkbox', onchange: (ev) => (conselhoLigado = ev.target.checked) }),
           h('span', { class: 'interruptor-trilho' }, h('span', { class: 'interruptor-bola' })),
@@ -817,6 +860,25 @@ export function montarEscritorio(raiz, opcoes = {}) {
         folga: 'de folga',
       }[r.estado];
       el.hidden = r.estado === 'folga' && r !== selecionado;
+      if (aoVivo) {
+        const e = r.ativo.estrategia;
+        el.hidden = false;
+        const linhas = [
+          h('div', { class: 'escritorio-cartao-topo' }, h('strong', {}, `${e.nome} · ${r.ativo.simbolo}`), h('span', { class: 'rotulo' }, e.ativa ? estado : 'parada')),
+          r.ativo.semCotacao
+            ? h('div', { class: 'rotulo' }, `sem cotação da ${r.ativo.mercado} agora`)
+            : h('div', { class: 'mono' }, formatarPreco(r.ativo, r.ativo.preco), ' ', h('span', { class: r.ativo.variacaoDia >= 0 ? 'ok' : 'perigo-txt' }, `${r.ativo.variacaoDia >= 0 ? '+' : ''}${(r.ativo.variacaoDia * 100).toFixed(2)}% hoje`)),
+          h('div', { class: 'rotulo' },
+            `${e.operando_real ? 'dinheiro REAL' : 'simulação'} · ${c.quantidade > 0 ? `posição desde ${formatarPreco(r.ativo, c.precoEntrada)}${r.ativo.semCotacao ? '' : ` (${mtm >= 0 ? '+' : ''}${mtm.toFixed(2)})`}` : 'sem posição'}`),
+          e.auto_ligado ? h('div', { class: 'rotulo' }, `Piloto: ${e.auto_situacao ?? 'aguardando a primeira passada'}`) : h('div', { class: 'rotulo' }, 'Piloto desligado: só age com sinal do webhook'),
+        ];
+        if (r === selecionado) {
+          linhas.push(h('div', { class: 'acoes' }, h('button', { class: 'pequeno secundario', onclick: (ev) => { ev.stopPropagation(); location.hash = '#/estrategias'; } }, 'Abrir em Estratégias')));
+        }
+        el.classList.toggle('selecionado', r === selecionado);
+        el.replaceChildren(...linhas);
+        continue;
+      }
       const filhos = [
         h('div', { class: 'escritorio-cartao-topo' }, h('strong', {}, `${r.nome} · ${r.ativo.simbolo}`), h('span', { class: 'rotulo' }, estado)),
         h('div', { class: 'mono' }, formatarPreco(r.ativo, r.ativo.preco), ' ', h('span', { class: r.ativo.variacaoDia >= 0 ? 'ok' : 'perigo-txt' }, `${r.ativo.variacaoDia >= 0 ? '+' : ''}${(r.ativo.variacaoDia * 100).toFixed(2)}%`)),
@@ -857,11 +919,11 @@ export function montarEscritorio(raiz, opcoes = {}) {
           'li',
           { class: e.decisao.aprovado ? 'aprovado' : 'reprovado' },
           h('div', { class: 'escritorio-cartao-topo' },
-            h('strong', {}, `${e.robo.nome}: ${lado} ${e.robo.ativo.simbolo}`),
+            h('strong', {}, `${aoVivo ? e.robo.ativo.nome : e.robo.nome}: ${lado} ${e.robo.ativo.simbolo}`),
             h('span', { class: `selo ${e.decisao.aprovado ? 'ok' : 'perigo-txt'}` }, e.decisao.aprovado ? 'aprovado' : 'reprovado'),
           ),
           h('div', { class: 'rotulo' }, `${e.hora} · ${formatarPreco(e.robo.ativo, p.preco)} · ${p.motivo}`),
-          h('div', { class: 'rotulo' }, `analista ${pct(p.confianca)} · chefe ${pct(e.verificacao.nota)} · juntos ${pct(e.decisao.combinada)} · ${e.decisao.motivo}`),
+          h('div', { class: 'rotulo' }, p.real ? `${p.rodape} · ${e.decisao.motivo}` : `analista ${pct(p.confianca)} · chefe ${pct(e.verificacao.nota)} · juntos ${pct(e.decisao.combinada)} · ${e.decisao.motivo}`),
           h('ul', { class: 'escritorio-itens' }, e.verificacao.itens.map((i) => h('li', { class: i.ok ? 'ok' : 'perigo-txt' }, `${i.ok ? '✔' : '✖'} ${i.texto}`))),
           e.decisao.conselho
             ? h('ul', { class: 'escritorio-itens escritorio-conselho' }, e.decisao.conselho.respostas.map((x) =>
@@ -870,7 +932,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
                   : h('li', { class: 'rotulo' }, `… IA ${x.conector} falhou: ${x.erro}`)))
             : null,
           e.execucao
-            ? h('div', { class: 'rotulo' }, `executado a ${formatarPreco(e.robo.ativo, e.execucao.preco)}${p.lado === 'venda' ? ` · resultado ${e.execucao.resultado >= 0 ? '+' : ''}${e.execucao.resultado.toFixed(2)}` : ''}`)
+            ? h('div', { class: 'rotulo' }, `executado a ${formatarPreco(e.robo.ativo, e.execucao.preco)}${p.lado === 'venda' && Number.isFinite(e.execucao.resultado) ? ` · resultado ${e.execucao.resultado >= 0 ? '+' : ''}${e.execucao.resultado.toFixed(2)}` : ''}`)
             : null,
         );
       }),
@@ -970,14 +1032,14 @@ export function montarEscritorio(raiz, opcoes = {}) {
     for (const r of [...robos, chefe]) D.desenharBalao(ctx, comoDesenho(r), tempo);
 
     // selo de simulação
-    ctx.fillStyle = 'rgba(178, 107, 0, 0.92)';
+    ctx.fillStyle = aoVivo ? 'rgba(34, 160, 92, 0.94)' : 'rgba(178, 107, 0, 0.92)';
     ctx.beginPath();
-    ctx.roundRect(14, 12, 238, 24, 6);
+    ctx.roundRect(14, 12, aoVivo ? 196 : 238, 24, 6);
     ctx.fill();
     ctx.fillStyle = '#111';
     ctx.font = '700 12px system-ui, sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText('SIMULAÇÃO · DADOS FICTÍCIOS', 26, 28);
+    ctx.fillText(aoVivo ? '● AO VIVO · DADOS REAIS' : 'SIMULAÇÃO · DADOS FICTÍCIOS', 26, 28);
     if (pausado) {
       ctx.fillStyle = 'rgba(0,0,0,0.45)';
       ctx.fillRect(0, 0, D.LARGURA, D.ALTURA);
@@ -1011,12 +1073,55 @@ export function montarEscritorio(raiz, opcoes = {}) {
   }
   rafId = requestAnimationFrame(quadro);
 
+  // ---------------------------------------------------------------- ao vivo: dados do servidor
+
+  const roboDa = (estrategiaId) => robos.find((r) => r.ativo.estrategiaId === estrategiaId);
+
+  /** Sinal que chega com o robô descansando (estratégia parada) vai direto para o registro. */
+  function registrarSemReuniao(r, proposta) {
+    const entrada = { hora: horaDoSinal({ recebido_em: proposta.quando }), robo: r, proposta, verificacao: proposta.verificacao, decisao: proposta.decisao, execucao: proposta.decisao.aprovado ? { preco: proposta.preco, resultado: Number.NaN } : null };
+    registro.unshift(entrada);
+    if (registro.length > 60) registro.pop();
+  }
+
+  function aplicarDados(d, primeiraVez = false) {
+    mercado.atualizar(d);
+    for (const r of robos) {
+      const e = r.ativo.estrategia;
+      carteiraDa(e, r.carteira);
+      if (primeiraVez) continue;
+      if (e.ativa && r.estado === 'folga') escalar(r);
+      else if (!e.ativa && naMesa(r) && !ocupado(r)) dispensar(r);
+    }
+    const novos = [...d.sinais].sort((a, b) => a.id - b.id).filter((s) => s.id > ultimoSinal);
+    for (const s of novos) {
+      const r = roboDa(s.estrategia_id);
+      ultimoSinal = Math.max(ultimoSinal, s.id);
+      if (!r) continue;
+      const proposta = propostaDoSinal(s, r.ativo);
+      // os que já existiam ao abrir a tela entram no registro; os novos viram reunião
+      if (primeiraVez || !naMesa(r)) registrarSemReuniao(r, proposta);
+      else r.filaSinais.push(proposta);
+    }
+    desenharRegistro();
+  }
+
+  let intervaloAoVivo = 0;
+  if (aoVivo) {
+    aplicarDados(aoVivo.dados, true);
+    intervaloAoVivo = setInterval(() => {
+      const minha = ++buscaId;
+      aoVivo.buscar().then((d) => minha === buscaId && aplicarDados(d)).catch(() => undefined);
+    }, INTERVALO_AO_VIVO_MS);
+  }
+
   return {
     parar() {
       cancelAnimationFrame(rafId);
       observador.disconnect();
+      clearInterval(intervaloAoVivo);
     },
     // para testes e demonstração
-    _estado: { robos, chefe, mercado, registro, forcarSinal, definirVelocidade, aplicarEscala, alternarRobo },
+    _estado: { robos, chefe, mercado, registro, forcarSinal, definirVelocidade, aplicarEscala, alternarRobo, aplicarDados: aoVivo ? aplicarDados : null },
   };
 }

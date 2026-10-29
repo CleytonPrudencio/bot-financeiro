@@ -1,7 +1,7 @@
 // Painel do Bot Financeiro: moldura (menu lateral, topo, faixa de cotações), rotas e transições.
 // As páginas ficam em js/paginas/; a base (DOM seguro, API, avisos) em js/base.js.
 
-import { $, agora, api, FUSO, botaoIcone, h, icone, marca, precoCompacto, quandoSessaoExpirar, reduzido, tentar } from './js/base.js';
+import { $, agora, api, FUSO, botao, botaoIcone, h, icone, marca, precoCompacto, quandoSessaoExpirar, reduzido, tentar } from './js/base.js';
 import { telaLogin } from './js/login.js';
 import { paginaPainel } from './js/paginas/painel.js';
 import { paginaEstrategias } from './js/paginas/estrategias.js';
@@ -13,16 +13,47 @@ import { paginaAuditoria, paginaOrdens, paginaSinais } from './js/paginas/histor
 
 const conteudo = $('#conteudo');
 
+const CHAVE_MODO_ESCRITORIO = 'escritorio:modo';
+function lerModoEscritorio() {
+  try {
+    return localStorage.getItem(CHAVE_MODO_ESCRITORIO) === 'demo' ? 'demo' : 'vivo';
+  } catch {
+    return 'vivo';
+  }
+}
+
 async function paginaEscritorio() {
-  const [{ montarEscritorio }, ias] = await Promise.all([import('./escritorio/escritorio.js'), api('GET', '/ias').catch(() => [])]);
+  let modo = lerModoEscritorio();
+  const [{ montarEscritorio }, ias, dados] = await Promise.all([
+    import('./escritorio/escritorio.js'),
+    api('GET', '/ias').catch(() => []),
+    modo === 'vivo' ? api('GET', '/escritorio') : null,
+  ]);
+  const semEstrategias = modo === 'vivo' && !dados.estrategias.length;
+  if (semEstrategias) modo = 'demo';
   const caixa = h('div');
-  const escritorio = montarEscritorio(caixa, {
-    iasAtivas: ias.filter((c) => c.ativo).length,
-    consultarIa: (pedido) => api('POST', '/ias/parecer', pedido),
-  });
+  const escritorio = montarEscritorio(caixa, modo === 'vivo'
+    ? { aoVivo: { dados, buscar: () => api('GET', '/escritorio'), agora } }
+    : { iasAtivas: ias.filter((c) => c.ativo).length, consultarIa: (pedido) => api('POST', '/ias/parecer', pedido) });
   limpar.push(() => escritorio.parar());
+  const trocar = (novo) => {
+    try {
+      localStorage.setItem(CHAVE_MODO_ESCRITORIO, novo);
+    } catch {
+      // sem armazenamento: troca só agora
+    }
+    rota({ suave: true });
+  };
+  const botaoModo = (id, texto, nomeIcone) =>
+    botao(texto, { classe: `pequeno ${modo === id ? '' : 'secundario'}`, nomeIcone, onclick: () => modo !== id && trocar(id) });
   return [
-    h('div', { class: 'cabecalho' }, h('div', {}, h('h1', {}, 'Escritório'), h('p', { class: 'suave' }, 'Um robô para cada mercado: cripto, B3, câmbio, commodities e bolsa americana. Você escolhe quem trabalha hoje; sinal bom vai para o chefe, que confere de novo antes de executar.'))),
+    h('div', { class: 'cabecalho' },
+      h('div', {}, h('h1', {}, 'Escritório'), h('p', { class: 'suave' }, modo === 'vivo'
+        ? 'Ao vivo: um robô para cada estratégia sua, com preço real. Cada sinal que o bot recebe vira uma reunião com o chefe, e o carimbo mostra o que o bot decidiu de verdade.'
+        : semEstrategias
+          ? 'Você ainda não tem estratégias: por isso esta é a demonstração, com dados fictícios. Crie uma em Estratégias para ver o escritório ao vivo.'
+          : 'Demonstração com dados fictícios: um robô para cada mercado, e nenhuma ordem sai daqui.')),
+      h('div', { class: 'acoes' }, botaoModo('vivo', 'Ao vivo', 'energia'), botaoModo('demo', 'Demonstração', 'escritorio'))),
     caixa,
   ];
 }
