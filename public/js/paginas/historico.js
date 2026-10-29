@@ -43,6 +43,22 @@ function tabela(colunas, linhas, { aoClicar, detalhe } = {}) {
   return { el, desenhar };
 }
 
+const NOMES_ETAPAS = { pesquisa: 'Pesquisa', sentimento: 'Sentimento', tecnica: 'Análise técnica', risco: 'Risco' };
+
+/** O que cada etapa do agente disse sobre este sinal. */
+function passadaDoAgente(a) {
+  if (!a) return null;
+  return h('div', { class: 'pareceres' }, h('h4', {}, icone('robo'), `Agente em etapas · ${a.decisao ? (a.decisao === 'aprovar' ? 'aprovou' : 'vetou') : 'falhou'}${a.ms ? ` em ${(a.ms / 1000).toFixed(1)} s` : ''}`),
+    h('div', { class: 'pareceres-lista' }, Object.entries(NOMES_ETAPAS).filter(([id]) => a.etapas?.[id]).map(([id, nome]) => {
+      const x = a.etapas[id];
+      return h('div', { class: `parecer parecer-${x.ok ? (x.resultado.vies === 'contra' ? 'vetar' : x.resultado.vies === 'a_favor' ? 'aprovar' : 'neutro') : 'falha'}` },
+        h('div', { class: 'parecer-topo' }, h('strong', {}, nome), x.ok ? selo(`${x.resultado.vies.replace('_', ' ')} · ${x.resultado.nota}`, x.resultado.vies === 'contra' ? 'perigo' : x.resultado.vies === 'a_favor' ? 'ok' : 'neutro') : selo('falhou', 'perigo', 'alerta'), h('span', { class: 'mono suave' }, `${(x.ms / 1000).toFixed(1)} s`)),
+        h('span', { class: 'suave mono pequeno-texto' }, `${x.conector} · ${x.modelo}`),
+        h('p', {}, x.ok ? x.resultado.resumo : x.erro));
+    })),
+    a.motivo ? h('p', { class: 'suave' }, h('strong', {}, 'Decisão: '), a.motivo) : null);
+}
+
 function pareceres(lista) {
   if (!lista?.length) return null;
   return h('div', { class: 'pareceres' }, h('h4', {}, icone('ias'), 'Parecer das IAs'), h('div', { class: 'pareceres-lista' }, lista.map((p) =>
@@ -66,7 +82,7 @@ export async function paginaSinais() {
     ['IP', (x) => h('span', { class: 'mono suave' }, x.ip ?? ''), 'some-celular'],
   ];
   const t = tabela(colunas, sinais, {
-    detalhe: (x) => h('div', { class: 'detalhe' }, h('h4', {}, 'Corpo recebido'), h('pre', { class: 'codigo' }, JSON.stringify(x.corpo, null, 2)), pareceres(x.pareceres)),
+    detalhe: (x) => h('div', { class: 'detalhe' }, h('h4', {}, 'Corpo recebido'), h('pre', { class: 'codigo' }, JSON.stringify(x.corpo, null, 2)), passadaDoAgente(x.agente), pareceres(x.pareceres)),
   });
   const aplicar = (f) =>
     t.desenhar(sinais.filter((x) => (!f.situacao || x.situacao === f.situacao) && (!f.texto || JSON.stringify([x.estrategia, x.acao, x.motivo, x.ip, x.corpo]).toLowerCase().includes(f.texto))));
@@ -140,6 +156,8 @@ const TIPOS = {
   ia_apagada: ['ias', 'Apagou um conector de IA'],
   ia_pergunta: ['ias', 'Perguntou às IAs'],
   analise_pedida: ['analise', 'Pediu uma análise de 5 agentes'],
+  agente_configurado: ['robo', 'Configurou o agente em etapas'],
+  agente_testado: ['robo', 'Testou o agente em etapas'],
 };
 
 export async function paginaAuditoria() {

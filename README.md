@@ -117,6 +117,26 @@ A chave fica cifrada como as das exchanges e nunca volta para o painel; fora da 
 O parecer de cada IA fica gravado no sinal (página **Sinais**, clique na linha). A página IAs também
 tem **Perguntar a todas**: a mesma pergunta vai para as IAs escolhidas ao mesmo tempo.
 
+## Agente em etapas
+
+Página **Agente**: uma esteira em que cada etapa usa a IA que é melhor naquilo. Pesquisa, sentimento,
+análise técnica e risco rodam ao mesmo tempo, e a **decisão final** lê o relatório de cada uma e
+aprova ou veta.
+
+| Etapa | O que faz | Melhor para isso (sugestão) |
+|---|---|---|
+| 1 · Pesquisa | notícias, fatos e eventos recentes | Perplexity (Sonar Pro) ou Claude com pesquisa na web |
+| 2 · Sentimento | humor do mercado, redes, X, alavancagem | Grok (xAI), que lê o X em tempo real |
+| 3 · Análise técnica | indicadores calculados das velas | Qwen3 Max (OpenRouter) ou Claude |
+| 4 · Risco | volatilidade, queda, tamanho da ordem, limites | DeepSeek ou Claude |
+| 5 · Decisão final | lê tudo e decide | Claude Opus 5.5 com esforço alto |
+
+**Montar automático** escolhe, entre as IAs cadastradas, a que mais combina com cada etapa (pelo
+provedor e pelo modelo); confira e salve. Na estratégia, "Como as IAs decidem" → **Agente em
+etapas**: o veredito da esteira vira um voto só, com a mesma política do conselho (só barra; etapa
+que falhou é dado que faltou; sem IA na decisão, a ordem não sai no modo obrigatório). Cada passada
+fica gravada e aparece no detalhe do sinal; dá para testar com uma ordem de mentira na própria página.
+
 ## Mesa de análise (5 agentes)
 
 Página **Análises**: cinco agentes de IA dão nota a um ativo, cada um com 5 subnotas de 0 a 20 —
@@ -212,6 +232,7 @@ src/
   risco.ts             regras de risco, parecer das IAs e nota da análise (funções puras, testadas)
   ia/                  conectores de IA: anthropic.ts (SDK oficial), compativel.ts (formato OpenAI), prompt.ts
   analise/             mesa de 5 agentes: agentes.ts, indicadores.ts, nota.ts, index.ts
+  agente/              agente em etapas: etapas.ts (etapas, textos, montar automático), index.ts (esteira)
   sinal.ts             leitura e normalização do sinal
   brokers/             ccxt.ts (exchanges reais e cotação pública), simulacao.ts
   routes/api.ts        API do painel (login, contas, estratégias, sinais, ordens, auditoria)

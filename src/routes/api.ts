@@ -9,6 +9,8 @@ import { corretoraReal, type Conta, type Estrategia } from '../motor.js';
 import { cotacaoPublica, exchangePublica, exchangesSuportadas } from '../brokers/ccxt.js';
 import { moedas } from '../brokers/tipos.js';
 import { iniciarAnalise } from '../analise/index.js';
+import { agentePronto, iniciarTeste, lerConfig, salvarConfig, type ConfigAgente } from '../agente/index.js';
+import { ETAPAS, montarAutomatico } from '../agente/etapas.js';
 import { AGENTES } from '../analise/agentes.js';
 import {
   consultarIas, MODELOS_CLAUDE, pedirParecer, perguntarIas, PEDIDO_DE_TESTE, PRESETS_COMPATIVEIS,
@@ -327,6 +329,7 @@ const esquemaEstrategia = z
     desvio_max_pct: z.number().min(0.01).max(50).default(1),
     ips_permitidos: z.string().trim().max(1000).nullable().default(null),
     ia_modo: z.enum(['desligado', 'consultivo', 'obrigatorio']).default('desligado'),
+    ia_tipo: z.enum(['conselho', 'agente']).default('conselho'),
     ia_conectores: z.array(z.number().int().positive()).max(20).default([]),
     ia_quorum: z.number().int().min(1).max(20).nullable().default(null),
     ia_falha: z.enum(['reprova', 'ignora']).default('reprova'),
@@ -381,12 +384,12 @@ api.post('/estrategias', async (req, res) => {
     `insert into estrategias (nome, conta_id, simbolo, ativa, real, token_hash, token_prefixo, valor_ordem, limite_por_ordem,
                               limite_diario, limite_posicao, intervalo_min_seg, desvio_max_pct, ips_permitidos,
                               ia_modo, ia_conectores, ia_quorum, ia_falha, ia_confianca_min, ia_nas_vendas, ia_contexto,
-                              analise_nota_min, analise_validade_h)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23) returning id`,
+                              analise_nota_min, analise_validade_h, ia_tipo)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24) returning id`,
     [d.nome, d.conta_id, d.simbolo, d.ativa, d.real, t.hash, t.prefixo, d.valor_ordem, d.limite_por_ordem,
       d.limite_diario, d.limite_posicao, d.intervalo_min_seg, d.desvio_max_pct, d.ips_permitidos || null,
       d.ia_modo, d.ia_conectores, d.ia_quorum, d.ia_falha, d.ia_confianca_min, d.ia_nas_vendas, d.ia_contexto || null,
-      d.analise_nota_min, d.analise_validade_h],
+      d.analise_nota_min, d.analise_validade_h, d.ia_tipo],
   );
   await evento(req.usuarioId, 'estrategia_criada', { estrategia: r[0]!.id, real: d.real });
   // o token só aparece agora; no banco fica só o hash
@@ -411,12 +414,12 @@ api.patch('/estrategias/:id', async (req, res) => {
     `update estrategias set nome = $2, simbolo = $3, ativa = $4, real = $5, valor_ordem = $6, limite_por_ordem = $7,
             limite_diario = $8, limite_posicao = $9, intervalo_min_seg = $10, desvio_max_pct = $11, ips_permitidos = $12,
             ia_modo = $13, ia_conectores = $14, ia_quorum = $15, ia_falha = $16, ia_confianca_min = $17,
-            ia_nas_vendas = $18, ia_contexto = $19, analise_nota_min = $20, analise_validade_h = $21
+            ia_nas_vendas = $18, ia_contexto = $19, analise_nota_min = $20, analise_validade_h = $21, ia_tipo = $22
       where id = $1`,
     [estId, novo.nome, novo.simbolo, novo.ativa, novo.real, novo.valor_ordem, novo.limite_por_ordem, novo.limite_diario,
       novo.limite_posicao, novo.intervalo_min_seg, novo.desvio_max_pct, novo.ips_permitidos || null,
       novo.ia_modo, novo.ia_conectores, novo.ia_quorum, novo.ia_falha, novo.ia_confianca_min, novo.ia_nas_vendas,
-      novo.ia_contexto || null, novo.analise_nota_min, novo.analise_validade_h],
+      novo.ia_contexto || null, novo.analise_nota_min, novo.analise_validade_h, novo.ia_tipo],
   );
   await evento(req.usuarioId, 'estrategia_alterada', { estrategia: estId, mudou: d });
   res.json({ ok: true });
@@ -457,7 +460,9 @@ api.get('/sinais', async (req, res) => {
               (select coalesce(json_agg(json_build_object(
                         'conector', p.conector_nome, 'modelo', p.modelo, 'decisao', p.decisao, 'confianca', p.confianca,
                         'motivo', p.motivo, 'erro', p.erro, 'ms', p.ms) order by p.id), '[]'::json)
-                 from pareceres_ia p where p.sinal_id = s.id) as pareceres
+                 from pareceres_ia p where p.sinal_id = s.id) as pareceres,
+              (select json_build_object('etapas', a.etapas, 'decisao', a.decisao, 'confianca', a.confianca, 'motivo', a.motivo, 'ms', a.ms)
+                 from agente_execucoes a where a.sinal_id = s.id limit 1) as agente
          from sinais s left join estrategias e on e.id = s.estrategia_id
         where ($1::bigint is null or s.estrategia_id = $1)
         order by s.recebido_em desc limit $2`,
@@ -683,6 +688,86 @@ api.get('/analises', async (_req, res) => {
 api.get('/analises/:id', async (req, res) => {
   const a = await umOuNada('select * from analises where id = $1', [id(req)]);
   if (!a) return void res.status(404).json({ erro: 'análise não existe' });
+  res.json(a);
+});
+
+// ------------------------------------------------------------------ agente em etapas
+
+const idsEtapas = ETAPAS.map((e) => e.id) as [string, ...string[]];
+const esquemaConfigAgente = z.object({
+  etapas: z.partialRecord(z.enum(idsEtapas), z.object({ conector_id: z.number().int().positive().nullable(), web: z.boolean().optional() })),
+});
+
+api.get('/agente', async (_req, res) => {
+  const [config, conectores] = await Promise.all([lerConfig(), query<ConectorIa>('select * from conectores_ia order by id')]);
+  res.json({
+    etapas: ETAPAS.map(({ id, nome, papel, recomendado, usaWeb }) => ({ id, nome, papel, recomendado, usa_web: Boolean(usaWeb) })),
+    config,
+    pronto: agentePronto(config, conectores),
+    sugestao: montarAutomatico(conectores),
+  });
+});
+
+api.put('/agente', async (req, res) => {
+  const d = validar(esquemaConfigAgente, req.body) as ConfigAgente;
+  const ids = Object.values(d.etapas).flatMap((e) => (e?.conector_id ? [e.conector_id] : []));
+  if (ids.length) {
+    const achados = await query<{ id: number }>('select id from conectores_ia where id = any($1::bigint[])', [ids]);
+    if (achados.length !== new Set(ids).size) throw new ErroPedido('algum conector escolhido não existe');
+  }
+  await salvarConfig(d);
+  await evento(req.usuarioId, 'agente_configurado', { etapas: Object.fromEntries(Object.entries(d.etapas).map(([k, v]) => [k, v?.conector_id ?? null])) });
+  res.json({ ok: true });
+});
+
+api.post('/agente/testar', limiteIa, async (req, res) => {
+  const d = validar(
+    z.object({
+      simbolo: z.string().trim().toUpperCase().min(1).max(40),
+      lado: z.enum(['compra', 'venda']).default('compra'),
+      valor: z.number().positive().default(100),
+      exchange: z.string().trim().max(40).nullable().optional(),
+      contexto: z.string().trim().max(1000).optional(),
+    }),
+    req.body,
+  );
+  if (d.exchange && !exchangesSuportadas().includes(d.exchange)) throw new ErroPedido(`exchange "${d.exchange}" não suportada`);
+  const [config, conectores] = await Promise.all([lerConfig(), query<ConectorIa>('select * from conectores_ia where ativo')]);
+  if (!agentePronto(config, conectores)) throw new ErroPedido('escolha uma IA ativa para a etapa de decisão');
+  let cotacao: number | null = null;
+  if (d.exchange && d.simbolo.includes('/')) cotacao = await cotacaoPublica(d.exchange, d.simbolo).catch(() => null);
+  const id = await iniciarTeste(
+    {
+      estrategia: 'teste do painel (nenhuma ordem sai)',
+      contexto: d.contexto ?? null,
+      simbolo: d.simbolo,
+      lado: d.lado,
+      modo: 'simulacao',
+      ...(d.lado === 'compra' ? { valor: d.valor } : { quantidade: d.valor }),
+      cotacao,
+      posicao: { quantidade: 0, custo_total: 0 },
+      gasto_hoje: 0,
+      limite_diario: d.valor * 5,
+    },
+    d.exchange ?? (d.simbolo.includes('/') ? 'binance' : null),
+    conectores,
+  );
+  await evento(req.usuarioId, 'agente_testado', { execucao: id, simbolo: d.simbolo });
+  res.status(202).json({ id });
+});
+
+api.get('/agente/execucoes', async (_req, res) => {
+  res.json(
+    await query(
+      `select a.id, a.origem, a.simbolo, a.lado, a.situacao, a.decisao, a.confianca, a.ms, a.criada_em, e.nome as estrategia
+         from agente_execucoes a left join estrategias e on e.id = a.estrategia_id order by a.criada_em desc limit 30`,
+    ),
+  );
+});
+
+api.get('/agente/execucoes/:id', async (req, res) => {
+  const a = await umOuNada('select * from agente_execucoes where id = $1', [id(req)]);
+  if (!a) return void res.status(404).json({ erro: 'execução não existe' });
   res.json(a);
 });
 

@@ -11,6 +11,7 @@ export const PRESETS_COMPATIVEIS = [
   { id: 'deepseek', nome: 'DeepSeek', url_base: 'https://api.deepseek.com/v1', precisa_chave: true },
   { id: 'mistral', nome: 'Mistral', url_base: 'https://api.mistral.ai/v1', precisa_chave: true },
   { id: 'xai', nome: 'xAI (Grok)', url_base: 'https://api.x.ai/v1', precisa_chave: true },
+  { id: 'perplexity', nome: 'Perplexity (pesquisa com fontes)', url_base: 'https://api.perplexity.ai', precisa_chave: true, modelo: 'sonar-pro' },
   { id: 'ollama', nome: 'Ollama da VM (saplink-ollama, grátis)', url_base: 'http://saplink-ollama:11434/v1', precisa_chave: false, modelo: 'qwen2.5:7b' },
   { id: 'outro', nome: 'Outro compatível com OpenAI', url_base: '', precisa_chave: false },
 ];

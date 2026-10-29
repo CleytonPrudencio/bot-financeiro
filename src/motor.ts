@@ -4,7 +4,8 @@ import { derivarChave, decifrar, hashToken } from './crypto.js';
 import { transacao, umOuNada } from './db.js';
 import { logger } from './logger.js';
 import { avaliar, conferirAnalise, consultaIa, decidirComIa, type AnaliseRecente, type EstadoRisco, type PoliticaIa } from './risco.js';
-import { consultarIas, type ConectorIa, type RespostaIa } from './ia/index.js';
+import { consultarIas, type ConectorIa, type PedidoParecer, type RespostaIa } from './ia/index.js';
+import { dadosParaAgente, gravarExecucao, lerConfig, rodarAgente, type ResultadoAgente } from './agente/index.js';
 import { lerSinal, type Sinal } from './sinal.js';
 import { CorretoraCcxt, cotacaoPublica } from './brokers/ccxt.js';
 import { simularCompra, simularVenda } from './brokers/simulacao.js';
@@ -40,6 +41,7 @@ export interface Estrategia {
   desvio_max_pct: number;
   ips_permitidos: string | null;
   ia_modo: 'desligado' | 'consultivo' | 'obrigatorio';
+  ia_tipo: 'conselho' | 'agente';
   ia_conectores: number[];
   ia_quorum: number | null;
   ia_falha: 'reprova' | 'ignora';
@@ -219,13 +221,20 @@ export async function processarSinal(token: string, corpo: unknown, ip: string |
       }
     }
 
-    // Parecer das IAs: só depois que as regras aprovaram, e só para barrar.
+    // Parecer das IAs: só depois que as regras aprovaram, e só para barrar. No modo "conselho" as
+    // IAs votam ao mesmo tempo; no modo "agente" a esteira de etapas dá um voto só.
     let pareceres: RespostaIa[] = [];
+    let execucaoAgente: ResultadoAgente | null = null;
+    const gravarConsultas = async (sinalId: number) => {
+      await gravarPareceres(c, sinalId, est.id, pareceres);
+      if (execucaoAgente) {
+        await gravarExecucao((sql, p) => c.query(sql, p).then((r) => r.rows), { sinalId, estrategiaId: est.id, origem: 'sinal', simbolo: est.simbolo, lado: decisao.lado }, execucaoAgente);
+      }
+    };
     let preco = precoAntes;
     const politica = politicaIa(est);
     if (consultaIa(sinal.acao, politica)) {
-      const conectores = await conectoresDa(c, est);
-      pareceres = await consultarIas(conectores, {
+      const pedido: PedidoParecer = {
         estrategia: est.nome,
         contexto: est.ia_contexto,
         simbolo: est.simbolo,
@@ -237,15 +246,23 @@ export async function processarSinal(token: string, corpo: unknown, ip: string |
         posicao: parcial.posicao,
         gasto_hoje: parcial.gastoHoje,
         limite_diario: est.limite_diario,
-      });
+      };
+      if (est.ia_tipo === 'agente') {
+        const todos = (await c.query<ConectorIa>('select * from conectores_ia where ativo')).rows;
+        const config = await lerConfig((sql, p) => c.query(sql, p).then((r) => r.rows));
+        execucaoAgente = await rodarAgente({ pedido, dados: await dadosParaAgente(conta.exchange, est.simbolo), config, conectores: todos });
+        pareceres = [execucaoAgente.final];
+      } else {
+        pareceres = await consultarIas(await conectoresDa(c, est), pedido);
+      }
       const veredito = decidirComIa(
         pareceres.map((r) => (r.ok ? { ok: true as const, decisao: r.parecer.decisao, confianca: r.parecer.confianca } : { ok: false as const })),
         politica,
       );
-      logger.info({ estrategia: est.id, aprovado: veredito.aprovado, motivo: veredito.motivo }, 'parecer das IAs');
+      logger.info({ estrategia: est.id, tipo: est.ia_tipo, aprovado: veredito.aprovado, motivo: veredito.motivo }, 'parecer das IAs');
       if (!veredito.aprovado) {
         const sinalId = await registrarSinal(c, est.id, sinal, corpo, ip, 'rejeitado', veredito.motivo);
-        await gravarPareceres(c, sinalId, est.id, pareceres);
+        await gravarConsultas(sinalId);
         return { status: 200, situacao: 'rejeitado', motivo: veredito.motivo };
       }
       // a consulta levou alguns segundos: atualiza a cotação, se der
@@ -264,7 +281,7 @@ export async function processarSinal(token: string, corpo: unknown, ip: string |
         const saldo = await saldoSimulado(c, conta.id, moedaCotacao);
         if (saldo + EPS < decisao.valor) {
           const motivo = `saldo simulado insuficiente: ${saldo} ${moedaCotacao}, precisa de ${decisao.valor}`;
-          await gravarPareceres(c, await registrarSinal(c, est.id, sinal, corpo, ip, 'rejeitado', motivo), est.id, pareceres);
+          await gravarConsultas(await registrarSinal(c, est.id, sinal, corpo, ip, 'rejeitado', motivo));
           return { status: 200, situacao: 'rejeitado', motivo };
         }
         exec = simularCompra(decisao.valor, preco, conta.taxa_simulada_pct);
@@ -275,7 +292,7 @@ export async function processarSinal(token: string, corpo: unknown, ip: string |
       const erro = (e as Error).message.slice(0, 500);
       logger.error({ estrategia: est.id, modo: decisao.modo, erro }, 'exchange recusou a ordem');
       const sinalId = await registrarSinal(c, est.id, sinal, corpo, ip, 'erro', erro);
-      await gravarPareceres(c, sinalId, est.id, pareceres);
+      await gravarConsultas(sinalId);
       await c.query(
         `insert into ordens (estrategia_id, conta_id, sinal_id, modo, simbolo, lado, quantidade, preco_medio, custo, situacao, erro)
          values ($1, $2, $3, $4, $5, $6, 0, 0, 0, 'erro', $7)`,
@@ -288,7 +305,7 @@ export async function processarSinal(token: string, corpo: unknown, ip: string |
     logger.info({ estrategia: est.id, modo: decisao.modo, lado: decisao.lado, simbolo: est.simbolo, exec }, 'ordem executada');
 
     const sinalId = await registrarSinal(c, est.id, sinal, corpo, ip, 'executado', null);
-    await gravarPareceres(c, sinalId, est.id, pareceres);
+    await gravarConsultas(sinalId);
     const ordem = await c.query<{ id: number }>(
       `insert into ordens (estrategia_id, conta_id, sinal_id, modo, simbolo, lado, quantidade, preco_medio, custo, taxa, id_exchange, situacao)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'executada') returning id`,

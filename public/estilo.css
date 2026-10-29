@@ -688,6 +688,40 @@ input[type='checkbox'] { width: auto; }
   .coluna-analise { position: static; }
 }
 
+/* ------------------------------------------------------------------ agente em etapas */
+
+.esteira { display: grid; gap: 10px; }
+.esteira-etapas { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.etapa { display: grid; gap: 10px; align-content: start; border-top: 3px solid color-mix(in srgb, var(--ia) 60%, transparent); }
+.etapa-decisao { border-top-color: var(--ouro); background: radial-gradient(600px 160px at 50% 0%, color-mix(in srgb, var(--ouro) 10%, transparent), transparent 70%), var(--painel); }
+.etapa-topo { display: flex; align-items: center; gap: 10px; }
+.etapa-numero { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font-size: 12.5px; font-weight: 800; color: #fff; background: linear-gradient(135deg, #a78bfa, #7c3aed); flex: none; }
+.etapa-decisao .etapa-numero { background: linear-gradient(135deg, #fbbf24, #d97706); }
+.etapa-papel { min-height: 34px; }
+.etapa-recomendado { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; color: var(--suave); }
+.etapa-recomendado .ic { width: 14px; height: 14px; color: var(--ia); margin-top: 2px; }
+.etapa-recomendado strong { color: var(--texto); font-weight: 600; }
+.etapa-web { font-size: 12.5px; }
+select.piscou { animation: piscar-ia 0.9s ease-out; }
+@keyframes piscar-ia { from { box-shadow: 0 0 0 4px color-mix(in srgb, var(--ia) 45%, transparent); border-color: var(--ia); } }
+.esteira-seta { display: grid; justify-items: center; color: var(--ia); }
+.esteira-seta span { width: 2px; height: 18px; background: repeating-linear-gradient(180deg, var(--ia) 0 5px, transparent 5px 10px); background-size: 2px 20px; animation: fluir 0.8s linear infinite; }
+.esteira-seta .ic { width: 20px; height: 20px; margin-top: -4px; }
+@keyframes fluir { to { background-position: 0 20px; } }
+.etapa-saida { display: grid; gap: 8px; }
+.etapa-saida-topo { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.etapa-saida-topo .mono { font-size: 11.5px; }
+.veredito { text-align: center; justify-items: center; padding: 6px 0; }
+.veredito-titulo { display: inline-flex; align-items: center; gap: 8px; font-size: 22px; letter-spacing: 0.04em; }
+.veredito-titulo .ic { width: 22px; height: 22px; }
+.veredito-aprovar .veredito-titulo { color: var(--ok); }
+.veredito-vetar .veredito-titulo { color: var(--perigo); }
+.resultado-agente { display: grid; gap: 4px; }
+.parecer-neutro { border-left-color: var(--fraco); }
+.form-linha { display: grid; gap: 12px; }
+@media (max-width: 1180px) { .esteira-etapas { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .esteira-etapas { grid-template-columns: 1fr; } }
+
 /* ------------------------------------------------------------------ login */
 
 body.na-entrada { overflow: hidden; }

@@ -22,6 +22,7 @@ Escreva em português do Brasil, código e comentários inclusive.
 8. **IA só barra.** Parecer das IAs e nota da análise rodam depois de `avaliar` e só podem rejeitar:
    nunca criam ordem, nunca mudam valor ou lado, e `zerar` nunca passa por eles. A regra fica em
    `src/risco.ts` (`decidirComIa`, `conferirAnalise`). Obrigatório sem IA para consultar = não sai.
+   O agente em etapas (`src/agente/`) entra como um voto só em `decidirComIa`.
 9. Claude pelo SDK oficial (`src/ia/anthropic.ts`); os outros provedores pelo formato da OpenAI
    (`src/ia/compativel.ts`). Chave de IA cifrada como as das exchanges; erro de provedor passa por
    `limparErro` antes de ir para a tela ou o log.

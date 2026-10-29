@@ -20,7 +20,8 @@ export interface PedidoAnalise {
   usuarioId: number | undefined;
 }
 
-async function dadosDeMercado(exchange: string | null, simbolo: string) {
+/** Indicadores das velas diárias da exchange (null sem exchange). Lança se a exchange falhar. */
+export async function dadosDeMercado(exchange: string | null, simbolo: string) {
   if (!exchange) return null;
   const velas = await velasDiarias(exchange, simbolo);
   if (velas.length < 30) throw new Error(`a ${exchange} devolveu só ${velas.length} velas de ${simbolo}`);

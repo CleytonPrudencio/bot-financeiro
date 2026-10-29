@@ -283,6 +283,43 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     expect((await sinal({ acao: 'comprar', id: 'an2' })).corpo).toMatchObject({ situacao: 'executado' });
   });
 
+  it('agente em etapas: cada etapa na sua IA, a decisão lê os relatórios e pode barrar', async () => {
+    const [c] = await db.query<{ id: number }>('select id from conectores_ia');
+    const [est] = await db.query<{ id: number }>('select id from estrategias');
+    expect((await painel('PUT', '/agente', { etapas: { pesquisa: { conector_id: 9999 } } })).status).toBe(400);
+    await painel('PUT', '/agente', { etapas: { pesquisa: { conector_id: c!.id }, tecnica: { conector_id: c!.id }, decisao: { conector_id: c!.id } } });
+    expect((await painel('GET', '/agente')).corpo).toMatchObject({ pronto: true });
+    await painel('PATCH', `/estrategias/${est!.id}`, { ia_modo: 'obrigatorio', ia_tipo: 'agente', analise_nota_min: null });
+
+    respostaIa = '{"vies":"contra","nota":20,"resumo":"queda forte","pontos":["abaixo da média 200"],"decisao":"vetar","confianca":0.9,"motivo":"a técnica foi contra"}';
+    const antes = pedidosIa.length;
+    const r = await sinal({ acao: 'comprar', id: 'ag1' });
+    expect(r.corpo).toMatchObject({ situacao: 'rejeitado' });
+    // duas etapas ligadas + a decisão
+    expect(pedidosIa.length - antes).toBe(3);
+    expect(pedidosIa.at(-1)!.corpo.messages[1]!.content).toContain('## Análise técnica');
+    const [exec] = await db.query<{ origem: string; decisao: string; etapas: Record<string, unknown>; sinal_id: number }>('select * from agente_execucoes');
+    expect(exec).toMatchObject({ origem: 'sinal', decisao: 'vetar' });
+    expect(Object.keys(exec!.etapas).sort()).toEqual(['pesquisa', 'tecnica']);
+    const [s1] = (await painel('GET', '/sinais?limite=1')).corpo as unknown as { agente: { decisao: string } }[];
+    expect(s1!.agente.decisao).toBe('vetar');
+
+    respostaIa = '{"vies":"a_favor","nota":80,"resumo":"ok","pontos":[],"decisao":"aprovar","confianca":0.85,"motivo":"tudo a favor"}';
+    expect((await sinal({ acao: 'comprar', id: 'ag2' })).corpo).toMatchObject({ situacao: 'executado' });
+  });
+
+  it('teste do agente pelo painel roda em segundo plano', async () => {
+    const t = await painel('POST', '/agente/testar', { simbolo: 'btc/usdt', exchange: 'binance' });
+    expect(t.status).toBe(202);
+    let e: Record<string, unknown> = {};
+    for (let i = 0; i < 50 && e.situacao !== 'pronta'; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      e = (await painel('GET', `/agente/execucoes/${t.corpo.id}`)).corpo;
+    }
+    expect(e).toMatchObject({ situacao: 'pronta', origem: 'teste', decisao: 'aprovar', simbolo: 'BTC/USDT' });
+    expect(Object.keys(e.etapas as object).sort()).toEqual(['decisao', 'pesquisa', 'tecnica']);
+  });
+
   it('auditoria registrou as ações do painel', async () => {
     const tipos = (await db.query<{ tipo: string }>('select tipo from eventos')).map((e) => e.tipo);
     expect(tipos).toEqual(expect.arrayContaining(['login', 'conta_criada', 'estrategia_criada', 'parada_ligada', 'parada_desligada']));
