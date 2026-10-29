@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { avaliar, consultaIa, decidirComIa, ipPermitido, type EstadoRisco, type PoliticaIa } from '../src/risco.js';
+import { avaliar, conferirSaida, consultaIa, decidirComIa, ipPermitido, PISO_PROTECAO, type EstadoRisco, type PoliticaIa } from '../src/risco.js';
 import type { Sinal } from '../src/sinal.js';
 
 function estado(mudar: Partial<EstadoRisco> = {}, est: Partial<EstadoRisco['estrategia']> = {}): EstadoRisco {
@@ -172,5 +172,32 @@ describe('parecer das IAs', () => {
 
   it('consultiva nunca barra', () => {
     expect(decidirComIa([nao(), nao()], politica({ modo: 'consultivo' }))).toMatchObject({ aprovado: true });
+  });
+});
+
+describe('saída do piloto automático', () => {
+  const regras = { stopPct: 3, alvoPct: 6, protecaoPct: 2.5, recuoPct: 1.5 };
+
+  it('stop: queda de 3% desde a compra fecha a posição', () => {
+    expect(conferirSaida(100, 97.5, 100, regras)).toEqual({ sair: false });
+    expect(conferirSaida(100, 97, 100, regras)).toMatchObject({ sair: true, tipo: 'stop' });
+  });
+  it('alvo: alta de 6% realiza o ganho', () => {
+    expect(conferirSaida(100, 106, 106, regras)).toMatchObject({ sair: true, tipo: 'alvo' });
+  });
+  it('proteção: depois de +2,5%, recuo de 1,5% do topo fecha; antes de +2,5%, não', () => {
+    expect(conferirSaida(100, 100.5, 102, regras)).toEqual({ sair: false }); // topo de +2%: proteção não ligou
+    expect(conferirSaida(100, 102, 103, regras)).toEqual({ sair: false }); // recuo de 0,97%
+    expect(conferirSaida(100, 101.4, 103, regras)).toMatchObject({ sair: true, tipo: 'protecao' }); // recuo de 1,55%
+  });
+  it('proteção nunca deixa sair no prejuízo: o gatilho tem piso no preço médio mais as taxas', () => {
+    const r = { ...regras, recuoPct: 10 };
+    expect(conferirSaida(100, 100.5, 103, r)).toEqual({ sair: false });
+    expect(conferirSaida(100, 100 * PISO_PROTECAO, 103, r)).toMatchObject({ sair: true, tipo: 'protecao' });
+  });
+  it('o preço atual conta como topo, e dado ruim não manda sair', () => {
+    expect(conferirSaida(100, 103, 0, regras)).toEqual({ sair: false });
+    expect(conferirSaida(0, 50, 0, regras)).toEqual({ sair: false });
+    expect(conferirSaida(100, Number.NaN, 0, regras)).toEqual({ sair: false });
   });
 });

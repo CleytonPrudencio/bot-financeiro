@@ -10,11 +10,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const URL_BANCO = process.env.TEST_DATABASE_URL;
 const PRECO = 50_000;
+let precoAgora = PRECO; // o teste do piloto derruba o preço para disparar o stop
 
 vi.mock('../src/brokers/ccxt.js', () => ({
   exchangesSuportadas: () => ['binance'],
   exchangePublica: async () => ({ markets: { 'BTC/USDT': {} } }),
-  cotacaoPublica: async () => PRECO,
+  cotacaoPublica: async () => precoAgora,
   velasDiarias: async () =>
     Array.from({ length: 300 }, (_, i) => {
       const f = PRECO * (0.8 + i / 1000);
@@ -349,6 +350,54 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     }
     expect(e).toMatchObject({ situacao: 'pronta', origem: 'teste', decisao: 'aprovar', simbolo: 'BTC/USDT' });
     expect(Object.keys(e.etapas as object).sort()).toEqual(['decisao', 'previsao']);
+  });
+
+  it('piloto automático cria a estratégia padrão uma vez só, em simulação', async () => {
+    const { rodadaPiloto, PADRAO } = await import('../src/piloto/index.js');
+    await rodadaPiloto();
+    await rodadaPiloto();
+    const padroes = await db.query<Record<string, unknown>>('select * from estrategias where nome = $1', [PADRAO.nome]);
+    expect(padroes).toHaveLength(1);
+    expect(padroes[0]).toMatchObject({
+      simbolo: 'BTC/BRL', ativa: true, real: false, valor_ordem: 50, limite_diario: 50, limite_posicao: 50,
+      ia_modo: 'obrigatorio', ia_tipo: 'agente', auto_ligado: true, auto_stop_pct: 3,
+    });
+    // a série falsa é uma alta reta (IFR 100): o piloto olhou a vela e não entrou
+    expect(String(padroes[0]!.auto_situacao)).toContain('sem entrada');
+    expect(await saldo('BRL')).toBe(50);
+  });
+
+  it('piloto automático: stop de perda zera a posição sem passar pela IA', async () => {
+    const { rodadaPiloto } = await import('../src/piloto/index.js');
+    const [conta] = await db.query<{ id: number }>(`select id from contas where nome = 'Binance simulada'`);
+    const est = await painel('POST', '/estrategias', {
+      nome: 'Com piloto', conta_id: conta!.id, simbolo: 'BTC/USDT', ativa: true,
+      valor_ordem: 50, limite_por_ordem: 50, limite_diario: 100, intervalo_min_seg: 0, auto_ligado: true, auto_stop_pct: 3,
+    });
+    expect(est.status).toBe(201);
+    const t = String(est.corpo.webhook).split('/webhook/')[1]!;
+    expect((await sinal({ acao: 'comprar', id: 'piloto-teste' }, t)).corpo).toMatchObject({ situacao: 'executado' });
+
+    precoAgora = PRECO * 0.99; // -1%: segura
+    await rodadaPiloto();
+    let [pos] = await db.query<{ quantidade: number; maior_preco: number }>('select * from posicoes where estrategia_id = $1', [est.corpo.id]);
+    expect(pos!.quantidade).toBeGreaterThan(0);
+    expect(pos!.maior_preco).toBe(PRECO * 0.99);
+
+    precoAgora = PRECO * 0.96; // -4%: passa do stop de 3%
+    try {
+      await rodadaPiloto();
+    } finally {
+      precoAgora = PRECO;
+    }
+    [pos] = await db.query<{ quantidade: number; maior_preco: number | null }>('select * from posicoes where estrategia_id = $1', [est.corpo.id]);
+    expect(pos).toMatchObject({ quantidade: 0, maior_preco: null });
+    const [ultimo] = await db.query<{ situacao: string; ip: string; corpo: { acao: string; id: string } }>(
+      'select situacao, ip, corpo from sinais where estrategia_id = $1 order by id desc limit 1', [est.corpo.id]);
+    expect(ultimo).toMatchObject({ situacao: 'executado', ip: 'piloto', corpo: { acao: 'zerar' } });
+    expect(ultimo!.corpo.id).toMatch(/^piloto-stop-/);
+    const [e] = await db.query<{ auto_situacao: string }>('select auto_situacao from estrategias where id = $1', [est.corpo.id]);
+    expect(e!.auto_situacao).toContain('stop de perda');
   });
 
   it('auditoria registrou as ações do painel', async () => {

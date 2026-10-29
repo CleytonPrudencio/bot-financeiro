@@ -26,7 +26,10 @@ Escreva em português do Brasil, código e comentários inclusive.
 9. Claude pelo SDK oficial (`src/ia/anthropic.ts`); os outros provedores pelo formato da OpenAI
    (`src/ia/compativel.ts`). Chave de IA cifrada como as das exchanges; erro de provedor passa por
    `limparErro` antes de ir para a tela ou o log.
-10. PATCH só muda os campos enviados (`soEnviados`): os `.default()` do zod não podem sobrescrever o
+10. **Piloto automático** (`src/piloto/`) só decide QUANDO pedir: manda o sinal por
+    `processarSinalDa`, como o webhook, nunca grava ordem direto. Regra de saída (stop, alvo,
+    proteção) fica em `src/risco.ts` (`conferirSaida`) e nunca passa pela IA.
+11. PATCH só muda os campos enviados (`soEnviados`): os `.default()` do zod não podem sobrescrever o
     que não veio.
 
 ## Comandos

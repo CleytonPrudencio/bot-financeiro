@@ -168,6 +168,25 @@ depende dela). Os agentes, as réguas e os pesos são adaptados do projeto
 `src/analise/LICENCA-ai-trading-claude.txt`), traduzidos e ajustados para cripto. É pesquisa e
 educação, não recomendação de investimento.
 
+## Piloto automático
+
+Para quem não tem TradingView: o próprio bot gera os sinais das estratégias com **piloto ligado**
+(`src/piloto/`) e manda pelo mesmo caminho do webhook (`processarSinalDa`). Então valem todas as
+regras de risco, a trava por estratégia, o agente de IA nas compras e as três chaves do dinheiro real.
+
+- **Entrada**, uma vez por vela diária **fechada**, só na virada: preço acima das médias de 20 e
+  200 dias, média de 50 acima da de 200, MACD positivo e IFR entre 40 e 70, numa vela que ontem não
+  cumpria tudo. Antes de chamar as IAs, o Kronos precisa dar 50% ou mais de chance de alta (corte
+  barato: as IAs só são consultadas poucas vezes por mês).
+- **Saída**, a cada minuto, sem IA (`conferirSaida` em `src/risco.ts`): stop de perda (padrão 3%),
+  alvo (6%), proteção do ganho (depois de +2,5%, um recuo de 1,5% do topo fecha, nunca abaixo do
+  preço médio mais as taxas) e, na vela diária, fechamento abaixo da média de 50 dias.
+- **Estratégia padrão**: na primeira conta Binance, o bot cria uma vez "Piloto BTC/BRL (padrão)":
+  R$ 50 por ordem, por dia e de posição; agente em etapas obrigatório; piloto ligado; em
+  **simulação** (com R$ 50 de saldo simulado). Operar real é decisão do dono.
+
+Nenhuma regra garante lucro: o stop limita a perda de cada operação, não evita que ela aconteça.
+
 ## Escritório virtual
 
 Página **Escritório** do painel: um escritório animado (Canvas, sem biblioteca) com **um robô

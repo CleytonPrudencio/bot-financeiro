@@ -50,6 +50,12 @@ export interface Estrategia {
   ia_contexto: string | null;
   analise_nota_min: number | null;
   analise_validade_h: number;
+  auto_ligado: boolean;
+  auto_stop_pct: number;
+  auto_alvo_pct: number;
+  auto_protecao_pct: number;
+  auto_recuo_pct: number;
+  auto_ultima_vela: number | null;
 }
 
 export function politicaIa(e: Estrategia): PoliticaIa {
@@ -167,9 +173,18 @@ async function carregarEstado(c: pg.PoolClient, est: Estrategia, conta: Conta) {
 export async function processarSinal(token: string, corpo: unknown, ip: string | null): Promise<Resultado> {
   const est = await umOuNada<Estrategia>('select * from estrategias where token_hash = $1', [hashToken(token)]);
   if (!est) return { status: 404 };
+  return processarSinalDa(est.id, corpo, ip);
+}
 
+/**
+ * Mesmo caminho do webhook, para quem já sabe a estratégia (o piloto automático). Relê a estratégia
+ * dentro da trava, para valer o estado de agora.
+ */
+export async function processarSinalDa(estrategiaId: number, corpo: unknown, ip: string | null): Promise<Resultado> {
   return transacao(async (c) => {
-    await c.query('select pg_advisory_xact_lock(1, $1::int)', [est.id]);
+    await c.query('select pg_advisory_xact_lock(1, $1::int)', [estrategiaId]);
+    const est = (await c.query<Estrategia>('select * from estrategias where id = $1', [estrategiaId])).rows[0];
+    if (!est) return { status: 404 } as const;
     const conta = (await c.query<Conta>('select * from contas where id = $1', [est.conta_id])).rows[0]!;
 
     const leitura = lerSinal(corpo);
@@ -364,8 +379,10 @@ async function atualizarPosicao(
     }
   }
   await c.query(
+    // maior_preco (piloto) recomeça quando a posição zera ou abre de novo
     `insert into posicoes (estrategia_id, quantidade, custo_total, atualizada_em) values ($1, $2, $3, now())
-     on conflict (estrategia_id) do update set quantidade = $2, custo_total = $3, atualizada_em = now()`,
+     on conflict (estrategia_id) do update set quantidade = $2, custo_total = $3, atualizada_em = now(),
+       maior_preco = case when $2 = 0 or posicoes.quantidade = 0 then null else posicoes.maior_preco end`,
     [estrategiaId, quantidade, custo],
   );
 }

@@ -173,3 +173,40 @@ export function conferirAnalise(
   if (analise.nota < e.analise_nota_min) return { ok: false, motivo: `nota da análise ${analise.nota} abaixo do mínimo ${e.analise_nota_min}` };
   return { ok: true };
 }
+
+// ------------------------------------------------------------------ saída do piloto automático
+//
+// Confere, a cada cotação, se a posição aberta tem de ser zerada. Sair nunca depende de IA.
+// - stop: o preço caiu `stopPct` abaixo do preço médio de compra (perda máxima da operação);
+// - alvo: subiu `alvoPct` acima do preço médio (realiza o ganho);
+// - proteção: depois que o ganho chegou a `protecaoPct`, um recuo de `recuoPct` desde o maior
+//   preço fecha a posição, e nunca abaixo do preço médio mais as taxas (`PISO_PROTECAO`).
+
+export interface RegrasSaida {
+  stopPct: number;
+  alvoPct: number;
+  protecaoPct: number;
+  recuoPct: number;
+}
+
+/** Ganho mínimo que a proteção garante: cobre as duas taxas (0,1% cada na Binance) com folga. */
+export const PISO_PROTECAO = 1.004;
+
+export type Saida = { sair: false } | { sair: true; tipo: 'stop' | 'alvo' | 'protecao'; motivo: string };
+
+export function conferirSaida(precoMedio: number, preco: number, maiorPreco: number, r: RegrasSaida): Saida {
+  if (!(precoMedio > 0) || !(preco > 0)) return { sair: false };
+  const pct = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
+  const variacao = (preco / precoMedio - 1) * 100;
+  const stop = precoMedio * (1 - r.stopPct / 100);
+  if (preco <= stop) return { sair: true, tipo: 'stop', motivo: `stop de perda: ${pct(variacao)} desde a compra (limite -${r.stopPct}%)` };
+  if (preco >= precoMedio * (1 + r.alvoPct / 100)) return { sair: true, tipo: 'alvo', motivo: `alvo de ganho: ${pct(variacao)} desde a compra` };
+  const maior = Math.max(maiorPreco, preco);
+  if (maior >= precoMedio * (1 + r.protecaoPct / 100)) {
+    const gatilho = Math.max(maior * (1 - r.recuoPct / 100), precoMedio * PISO_PROTECAO);
+    if (preco <= gatilho) {
+      return { sair: true, tipo: 'protecao', motivo: `proteção do ganho: chegou a ${pct((maior / precoMedio - 1) * 100)} e recuou; sai com ${pct(variacao)}` };
+    }
+  }
+  return { sair: false };
+}
