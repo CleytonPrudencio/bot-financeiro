@@ -10,7 +10,7 @@
 import { CATEGORIAS, criarMercadoFicticio, formatarPreco, ifr, aleatorio } from './mercado.js';
 import { analisar, aplicarConselho, decidirJuntos, executar, novaCarteira, verificarChefe, VALOR_POR_ORDEM } from './decisao.js';
 import * as D from './desenho.js';
-import { carteiraDa, criarMercadoReal, horaDoSinal, propostaDoSinal, visualDa } from './aovivo.js';
+import { carteiraDa, criarMercadoReal, horaDoSinal, motivoDoRobo, propostaDoSinal, visualDa } from './aovivo.js';
 
 const INTERVALO_AO_VIVO_MS = 15_000;
 
@@ -134,7 +134,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
       id: ativo.id,
       nome: aoVivo ? ativo.simbolo.split('/')[0] : ativo.nome,
       ativo,
-      carteira: aoVivo ? carteiraDa(ativo.estrategia, novaCarteira()) : novaCarteira(),
+      carteira: aoVivo && !ativo.olheiro ? carteiraDa(ativo.estrategia, novaCarteira()) : novaCarteira(),
       filaSinais: [],
       vaga: null,
       descanso: null,
@@ -678,7 +678,9 @@ export function montarEscritorio(raiz, opcoes = {}) {
         indice === null ? 'Lendo as velas…' : `IFR diário em ${indice.toFixed(0)}.`,
         r.carteira.quantidade > 0 ? `Posição aberta desde ${formatarPreco(r.ativo, r.carteira.precoEntrada)}.` : e.auto_ligado ? 'Sem posição. O piloto espera a virada.' : 'Sem posição. Esperando sinal do webhook.',
       ];
-      if (e.auto_ligado && e.auto_situacao) frasesReais.push(`Piloto: ${e.auto_situacao.length > 90 ? `${e.auto_situacao.slice(0, 89)}…` : e.auto_situacao}`);
+      const motivo = motivoDoRobo(r.ativo);
+      if (e.auto_ligado && motivo) frasesReais.push(motivo.length > 90 ? `${motivo.slice(0, 89)}…` : motivo);
+      if (r.ativo.olheiro) frasesReais.splice(2, 1, r.ativo.par?.virou ? 'Virou para alta! Vou levar ao chefe.' : 'De olho. Ainda não virou.');
       falar(r, frasesReais[Math.floor(mercado.rand() * frasesReais.length)], 2.8);
       return;
     }
@@ -780,7 +782,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
       h('div', { class: 'escala-grupo' },
         h('span', { class: 'rotulo' }, cat.nome),
         h('div', { class: 'escala-robos' }, robos.filter((r) => r.ativo.categoria === cat.id).map((r) => {
-          const b = h('button', { class: 'escala-robo', title: `${aoVivo ? r.ativo.nome : r.nome} · ${r.ativo.simbolo}`, onclick: () => alternarRobo(r) }, h('i', {}), aoVivo ? r.ativo.nome : r.nome);
+          const b = h('button', { class: 'escala-robo', title: `${aoVivo ? r.ativo.nome : r.nome} · ${r.ativo.simbolo}`, onclick: () => alternarRobo(r) }, h('i', {}), aoVivo ? (r.ativo.olheiro ? r.ativo.simbolo : r.ativo.nome) : r.nome);
           b.style.setProperty('--cor', r.cor);
           botoesRobo.set(r, b);
           return b;
@@ -863,14 +865,17 @@ export function montarEscritorio(raiz, opcoes = {}) {
       if (aoVivo) {
         const e = r.ativo.estrategia;
         el.hidden = false;
+        const motivo = motivoDoRobo(r.ativo);
         const linhas = [
-          h('div', { class: 'escritorio-cartao-topo' }, h('strong', {}, `${e.nome} · ${r.ativo.simbolo}`), h('span', { class: 'rotulo' }, e.ativa ? estado : 'parada')),
+          h('div', { class: 'escritorio-cartao-topo' },
+            h('strong', {}, r.ativo.olheiro ? `${r.ativo.simbolo} · olheiro` : `${e.nome} · ${r.ativo.simbolo}`),
+            h('span', { class: 'rotulo' }, e.ativa ? (r.ativo.par?.virou ? 'virou para alta' : estado) : 'parada')),
           r.ativo.semCotacao
             ? h('div', { class: 'rotulo' }, `sem cotação da ${r.ativo.mercado} agora`)
             : h('div', { class: 'mono' }, formatarPreco(r.ativo, r.ativo.preco), ' ', h('span', { class: r.ativo.variacaoDia >= 0 ? 'ok' : 'perigo-txt' }, `${r.ativo.variacaoDia >= 0 ? '+' : ''}${(r.ativo.variacaoDia * 100).toFixed(2)}% hoje`)),
-          h('div', { class: 'rotulo' },
+          r.ativo.olheiro ? h('div', { class: 'rotulo' }, `o piloto de "${e.nome}" está de olho neste par`) : h('div', { class: 'rotulo' },
             `${e.operando_real ? 'dinheiro REAL' : 'simulação'} · ${c.quantidade > 0 ? `posição desde ${formatarPreco(r.ativo, c.precoEntrada)}${r.ativo.semCotacao ? '' : ` (${mtm >= 0 ? '+' : ''}${mtm.toFixed(2)})`}` : 'sem posição'}`),
-          e.auto_ligado ? h('div', { class: 'rotulo' }, `Piloto: ${e.auto_situacao ?? 'aguardando a primeira passada'}`) : h('div', { class: 'rotulo' }, 'Piloto desligado: só age com sinal do webhook'),
+          e.auto_ligado ? h('div', { class: 'rotulo' }, `Piloto: ${motivo ?? 'aguardando a primeira passada'}`) : h('div', { class: 'rotulo' }, 'Piloto desligado: só age com sinal do webhook'),
         ];
         if (r === selecionado) {
           linhas.push(h('div', { class: 'acoes' }, h('button', { class: 'pequeno secundario', onclick: (ev) => { ev.stopPropagation(); location.hash = '#/estrategias'; } }, 'Abrir em Estratégias')));
@@ -919,7 +924,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
           'li',
           { class: e.decisao.aprovado ? 'aprovado' : 'reprovado' },
           h('div', { class: 'escritorio-cartao-topo' },
-            h('strong', {}, `${aoVivo ? e.robo.ativo.nome : e.robo.nome}: ${lado} ${e.robo.ativo.simbolo}`),
+            h('strong', {}, `${aoVivo ? (e.robo.ativo.olheiro ? 'olheiro' : e.robo.ativo.nome) : e.robo.nome}: ${lado} ${p.simboloDoSinal ?? e.robo.ativo.simbolo}`),
             h('span', { class: `selo ${e.decisao.aprovado ? 'ok' : 'perigo-txt'}` }, e.decisao.aprovado ? 'aprovado' : 'reprovado'),
           ),
           h('div', { class: 'rotulo' }, `${e.hora} · ${formatarPreco(e.robo.ativo, p.preco)} · ${p.motivo}`),
@@ -1075,7 +1080,12 @@ export function montarEscritorio(raiz, opcoes = {}) {
 
   // ---------------------------------------------------------------- ao vivo: dados do servidor
 
-  const roboDa = (estrategiaId) => robos.find((r) => r.ativo.estrategiaId === estrategiaId);
+  /** Quem leva o sinal ao chefe: na compra, o olheiro do par (quem achou); senão, o robô da estratégia. */
+  function roboDa(s) {
+    const daEstrategia = robos.filter((r) => r.ativo.estrategiaId === s.estrategia_id);
+    const olheiro = s.acao === 'comprar' && s.simbolo ? daEstrategia.find((r) => r.ativo.olheiro && r.ativo.simbolo === s.simbolo) : null;
+    return olheiro ?? daEstrategia.find((r) => !r.ativo.olheiro) ?? null;
+  }
 
   /** Sinal que chega com o robô descansando (estratégia parada) vai direto para o registro. */
   function registrarSemReuniao(r, proposta) {
@@ -1088,14 +1098,17 @@ export function montarEscritorio(raiz, opcoes = {}) {
     mercado.atualizar(d);
     for (const r of robos) {
       const e = r.ativo.estrategia;
-      carteiraDa(e, r.carteira);
+      if (!r.ativo.olheiro) {
+        carteiraDa(e, r.carteira);
+        r.nome = r.ativo.simbolo.split('/')[0];
+      }
       if (primeiraVez) continue;
       if (e.ativa && r.estado === 'folga') escalar(r);
       else if (!e.ativa && naMesa(r) && !ocupado(r)) dispensar(r);
     }
     const novos = [...d.sinais].sort((a, b) => a.id - b.id).filter((s) => s.id > ultimoSinal);
     for (const s of novos) {
-      const r = roboDa(s.estrategia_id);
+      const r = roboDa(s);
       ultimoSinal = Math.max(ultimoSinal, s.id);
       if (!r) continue;
       const proposta = propostaDoSinal(s, r.ativo);

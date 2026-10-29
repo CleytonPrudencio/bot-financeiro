@@ -485,10 +485,11 @@ api.get('/escritorio', async (_req, res) => {
   const estrategias = await query<{
     id: number; nome: string; simbolo: string; exchange: string; ativa: boolean; real: boolean; conta_modo: string;
     auto_ligado: boolean; auto_situacao: string | null; auto_checado_em: Date | null; ia_modo: string; ia_tipo: string;
-    valor_ordem: number; posicao: number; custo_posicao: number;
+    valor_ordem: number; posicao: number; custo_posicao: number; auto_varrer: boolean;
+    auto_varredura: { simbolo: string; preco: number | null; variacao_pct: number | null; motivo: string; virou: boolean }[] | null;
   }>(
     `select e.id, e.nome, e.simbolo, c.exchange, e.ativa, e.real, c.modo as conta_modo, e.auto_ligado, e.auto_situacao,
-            e.auto_checado_em, e.ia_modo, e.ia_tipo, e.valor_ordem,
+            e.auto_checado_em, e.ia_modo, e.ia_tipo, e.valor_ordem, e.auto_varrer, e.auto_varredura,
             coalesce(p.quantidade, 0) as posicao, coalesce(p.custo_total, 0) as custo_posicao
        from estrategias e join contas c on c.id = e.conta_id left join posicoes p on p.estrategia_id = e.id
       order by e.ativa desc, e.id`,
@@ -497,8 +498,18 @@ api.get('/escritorio', async (_req, res) => {
     estrategias.map(async (e) => {
       const [preco, velas] = await Promise.allSettled([cotacaoPublica(e.exchange, e.simbolo), velasComCache(e.exchange, e.simbolo)]);
       const lista = velas.status === 'fulfilled' ? velas.value : [];
+      // varredura do piloto: um "olheiro" por par (até 7), com as velas diárias para o monitor
+      const olhados = e.auto_ligado && e.auto_varrer ? (e.auto_varredura ?? []).filter((o) => o.simbolo !== e.simbolo).slice(0, 7) : [];
+      const pares = await Promise.all(
+        olhados.map(async (o) => {
+          const v = await velasComCache(e.exchange, o.simbolo).catch(() => []);
+          return { ...o, abertura_hoje: v[v.length - 1]?.abre ?? null, fechamentos: v.slice(0, -1).map((x) => x.fecha) };
+        }),
+      );
       return {
         ...e,
+        pares,
+        motivo_par: (e.auto_varredura ?? []).find((o) => o.simbolo === e.simbolo)?.motivo ?? null,
         operando_real: e.real && e.conta_modo === 'real' && config.realLiberadoNoServidor,
         preco: preco.status === 'fulfilled' ? preco.value : null,
         abertura_hoje: lista[lista.length - 1]?.abre ?? null,
@@ -508,6 +519,7 @@ api.get('/escritorio', async (_req, res) => {
   );
   const sinais = await query(
     `select s.id, s.estrategia_id, s.acao, s.situacao, s.motivo, s.ip, s.recebido_em, s.corpo->>'id' as id_externo,
+            s.corpo->>'simbolo' as simbolo,
             (select json_build_object('etapas', a.etapas, 'decisao', a.decisao, 'confianca', a.confianca, 'motivo', a.motivo)
                from agente_execucoes a where a.sinal_id = s.id limit 1) as agente,
             (select coalesce(json_agg(json_build_object('conector', p.conector_nome, 'decisao', p.decisao, 'confianca', p.confianca,

@@ -41,6 +41,19 @@ async function situacao(id: number, texto: string): Promise<void> {
   await query(`update estrategias set auto_situacao = $2, auto_checado_em = now() where id = $1`, [id, texto.slice(0, 500)]);
 }
 
+/** O que o piloto viu em cada par: o escritório ao vivo mostra um robô por par. */
+interface Olhado {
+  simbolo: string;
+  preco: number | null;
+  variacao_pct: number | null;
+  volume: number | null;
+  motivo: string;
+  virou: boolean;
+}
+async function gravarVarredura(id: number, olhados: Olhado[]): Promise<void> {
+  await query('update estrategias set auto_varredura = $2 where id = $1', [id, JSON.stringify(olhados)]);
+}
+
 /** Quanto comprar: o valor da estratégia, ou o saldo livre (menos 1%) se for menor. Nunca mais que o valor. */
 async function valorDaCompra(e: EstrategiaPiloto): Promise<number | null> {
   const moeda = moedas(e.simbolo).cotacao;
@@ -130,9 +143,10 @@ async function cuidar(e: EstrategiaPiloto, agora: number): Promise<void> {
   const tempo = e.auto_tempo;
   const duracao = MS_DA_VELA[tempo];
   const moeda = moedas(e.simbolo).cotacao;
-  const pares = e.auto_varrer
-    ? (await paresDaMoeda(e.exchange, moeda, e.auto_volume_min)).slice(0, MAX_PARES).map((p) => p.simbolo)
-    : [e.simbolo];
+  const listados = e.auto_varrer
+    ? (await paresDaMoeda(e.exchange, moeda, e.auto_volume_min)).slice(0, MAX_PARES)
+    : [{ simbolo: e.simbolo, volume: null, preco: null, variacao_pct: null }];
+  const pares = listados.map((p) => p.simbolo);
   if (!pares.length) return situacao(e.id, `nenhum par em ${moeda} na ${e.exchange} com volume de 24 h acima de ${e.auto_volume_min}`);
 
   const consultas = await consultasDeHoje(e.id);
@@ -143,28 +157,38 @@ async function cuidar(e: EstrategiaPiloto, agora: number): Promise<void> {
   const barrados = await paresBarrados(e.id);
   const resumo: string[] = [];
   const candidatos: Candidato[] = [];
+  const olhados: Olhado[] = [];
+  const anotar = (simbolo: string, motivo: string, virou = false, fechamento?: number) => {
+    const l = listados.find((x) => x.simbolo === simbolo);
+    olhados.push({ simbolo, preco: l?.preco ?? fechamento ?? null, variacao_pct: l?.variacao_pct ?? null, volume: l?.volume ?? null, motivo, virou });
+    if (!virou) resumo.push(`${simbolo}: ${motivo}`);
+  };
   for (const [k, v] of avaliados) if (v < agora) avaliados.delete(k);
   for (const simbolo of pares) {
     if (barrados.has(simbolo)) {
-      resumo.push(`${simbolo}: barrado há pouco, descansa`);
+      anotar(simbolo, 'barrado há pouco, descansa');
       continue;
     }
     const fechadas = velasFechadas(await velas(e.exchange, simbolo, tempo, 260), agora, duracao);
     const vela = fechadas[fechadas.length - 1]?.t ?? 0;
+    const fechamento = fechadas[fechadas.length - 1]?.fecha;
     const entrada = avaliarEntrada(fechadas);
     if (!entrada.comprar) {
-      resumo.push(`${simbolo}: ${entrada.motivo.replace(/^sem entrada: /, '')}`);
+      anotar(simbolo, entrada.motivo.replace(/^sem entrada: /, ''), false, fechamento);
       continue;
     }
     if (tempo !== '1d') {
       const contra = filtroDiario(velasFechadas(await diariasComCache(e.exchange, simbolo), agora));
       if (contra) {
-        resumo.push(`${simbolo}: virou, mas ${contra}`);
+        anotar(simbolo, `virou, mas ${contra}`, false, fechamento);
         continue;
       }
     }
     const chave = `${e.id}|${simbolo}|${vela}`;
-    if (avaliados.has(chave)) continue;
+    if (avaliados.has(chave)) {
+      anotar(simbolo, 'virou nesta vela e já foi avaliado', false, fechamento);
+      continue;
+    }
     avaliados.set(chave, agora + 2 * duracao + 3_600_000);
     // corte pelo Kronos antes de gastar IA (fora do ar: segue, e o agente decide sem a previsão)
     let prob: number | null = null;
@@ -175,12 +199,14 @@ async function cuidar(e: EstrategiaPiloto, agora: number): Promise<void> {
         logger.warn({ estrategia: e.id, simbolo, err: (erro as Error).message }, 'piloto: Kronos fora; segue sem a previsão');
       }
       if (prob !== null && prob < KRONOS_MIN_ALTA) {
-        resumo.push(`${simbolo}: virou, mas o Kronos dá só ${Math.round(prob * 100)}% de chance de alta`);
+        anotar(simbolo, `virou, mas o Kronos dá só ${Math.round(prob * 100)}% de chance de alta`, false, fechamento);
         continue;
       }
     }
+    anotar(simbolo, `${entrada.motivo}${prob !== null ? `; Kronos ${Math.round(prob * 100)}% de alta` : ''}`, true, fechamento);
     candidatos.push({ simbolo, vela, motivo: entrada.motivo, prob });
   }
+  await gravarVarredura(e.id, olhados);
 
   const olhou = `olhou ${pares.length} ${pares.length === 1 ? 'par' : 'pares'} em velas de ${tempo}`;
   if (!candidatos.length) return situacao(e.id, `${olhou}: nenhum virou para alta agora. ${resumo.slice(0, 6).join('; ')}`);

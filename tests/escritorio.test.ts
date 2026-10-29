@@ -136,7 +136,7 @@ describe('mercado fictício', () => {
 });
 
 // @ts-expect-error módulo JS do painel, sem tipos
-import { carteiraDa, criarMercadoReal, propostaDoSinal, visualDa } from '../public/escritorio/aovivo.js';
+import { carteiraDa, criarMercadoReal, motivoDoRobo, propostaDoSinal, visualDa } from '../public/escritorio/aovivo.js';
 
 describe('escritório ao vivo', () => {
   const estrategia = {
@@ -180,5 +180,26 @@ describe('escritório ao vivo', () => {
       recebido_em: '2026-10-29T18:00:00Z', agente: null, pareceres: [], ordem: { lado: 'venda', modo: 'real', preco: 504_400, custo: 50 },
     }, ativo);
     expect(p).toMatchObject({ lado: 'venda', urgente: true, preco: 504_400, motivo: 'stop de perda (piloto)', decisao: { aprovado: true, motivo: 'ordem REAL executada' } });
+  });
+});
+
+describe('escritório ao vivo: olheiros da varredura', () => {
+  it('um robô por par que o piloto olha, com o motivo de cada um', () => {
+    const e = {
+      id: 9, nome: 'Piloto', simbolo: 'BTC/BRL', exchange: 'binance', ativa: true, auto_ligado: true, auto_varrer: true,
+      auto_situacao: 'olhou 2 pares', motivo_par: 'média de 50 abaixo da de 200', posicao: 0, custo_posicao: 0, preco: 400_000, fechamentos: [],
+      pares: [{ simbolo: 'ETH/BRL', preco: 20_000, variacao_pct: 2.5, motivo: 'MACD sem força', virou: false, fechamentos: [19_000, 19_500] }],
+    };
+    const m = criarMercadoReal({ estrategias: [e] });
+    expect(m.ativos.map((a: { id: string }) => a.id)).toEqual(['e9', 'e9:ETH/BRL']);
+    const [principal, olheiro] = m.ativos;
+    expect(olheiro).toMatchObject({ olheiro: true, simbolo: 'ETH/BRL', nome: 'Olheiro ETH', preco: 20_000 });
+    expect(olheiro.variacaoDia).toBeCloseTo(0.025);
+    expect(motivoDoRobo(olheiro)).toBe('MACD sem força');
+    expect(motivoDoRobo(principal)).toBe('média de 50 abaixo da de 200');
+    // a estratégia trocou de par: o robô principal acompanha; o olheiro fica no par dele
+    m.atualizar({ estrategias: [{ ...e, simbolo: 'ETH/BRL', pares: [] }] });
+    expect(m.ativos[0].simbolo).toBe('ETH/BRL');
+    expect(m.ativos[1].simbolo).toBe('ETH/BRL');
   });
 });

@@ -77,7 +77,11 @@ const MOEDAS_ESTAVEIS = new Set(['USDT', 'USDC', 'FDUSD', 'BUSD', 'TUSD', 'DAI',
  * Pares à vista ativos cotados em `moeda` (ex.: BRL), sem moeda estável na base, com volume de 24 h
  * de pelo menos `volumeMin` (na própria moeda de cotação). Do mais negociado para o menos.
  */
-export async function paresDaMoeda(exchangeId: string, moeda: string, volumeMin: number): Promise<{ simbolo: string; volume: number }[]> {
+export async function paresDaMoeda(
+  exchangeId: string,
+  moeda: string,
+  volumeMin: number,
+): Promise<{ simbolo: string; volume: number; preco: number | null; variacao_pct: number | null }[]> {
   const ex = await exchangePublica(exchangeId);
   const simbolos = Object.values(ex.markets ?? {})
     .filter((m) => m && m.spot && m.active !== false && m.quote === moeda && !MOEDAS_ESTAVEIS.has(String(m.base)))
@@ -85,7 +89,10 @@ export async function paresDaMoeda(exchangeId: string, moeda: string, volumeMin:
   if (!simbolos.length) return [];
   const tickers = await ex.fetchTickers(simbolos);
   return simbolos
-    .map((simbolo) => ({ simbolo, volume: Number(tickers[simbolo]?.quoteVolume ?? 0) }))
+    .map((simbolo) => {
+      const t = tickers[simbolo];
+      return { simbolo, volume: Number(t?.quoteVolume ?? 0), preco: t?.last ?? null, variacao_pct: t?.percentage ?? null };
+    })
     .filter((p) => p.volume >= volumeMin)
     .sort((a, b) => b.volume - a.volume);
 }

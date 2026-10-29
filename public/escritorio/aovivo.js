@@ -38,52 +38,71 @@ function moedaDe(simbolo) {
 
 const casasPara = (preco) => (preco >= 1000 ? 0 : preco >= 1 ? 2 : 4);
 
-function montarAtivo(e, indice) {
-  const v = visualDa(e.simbolo, indice);
+// `par` é um "olheiro": um par que o piloto da estratégia está varrendo (sem posição própria)
+function montarAtivo(e, indice, par = null) {
+  const simbolo = par ? par.simbolo : e.simbolo;
+  const v = visualDa(simbolo, indice);
   const ativo = {
-    id: `e${e.id}`,
+    id: par ? `e${e.id}:${par.simbolo}` : `e${e.id}`,
     estrategiaId: e.id,
+    olheiro: Boolean(par),
     categoria: 'real',
     nome: e.nome,
-    simbolo: e.simbolo,
+    simbolo,
     mercado: e.exchange,
     horario: null,
     volDia: 0.03,
     sigma: 0.03,
     cor: v.cor,
-    moeda: moedaDe(e.simbolo),
+    moeda: moedaDe(simbolo),
     historico: [],
     preco: 0,
     aberturaDia: 0,
     variacaoDia: 0,
     casas: 2,
     estrategia: e,
+    par,
   };
-  atualizarAtivo(ativo, e);
+  atualizarAtivo(ativo, e, par);
   return ativo;
 }
 
-function atualizarAtivo(a, e) {
+function atualizarAtivo(a, e, par = null) {
   a.estrategia = e;
-  a.nome = e.nome;
+  a.nome = a.olheiro ? `Olheiro ${a.simbolo.split('/')[0]}` : e.nome;
+  if (par) a.par = par;
   // a varredura do piloto troca o par da estratégia quando entra numa oportunidade
-  a.simbolo = e.simbolo;
-  a.moeda = moedaDe(e.simbolo);
-  const fechamentos = (e.fechamentos ?? []).filter((x) => Number.isFinite(x) && x > 0);
+  if (!a.olheiro) a.simbolo = e.simbolo;
+  a.moeda = moedaDe(a.simbolo);
+  const fonte = a.olheiro ? a.par : e;
+  const fechamentos = (fonte.fechamentos ?? []).filter((x) => Number.isFinite(x) && x > 0);
   // sem cotação agora: fica a última conhecida
-  const preco = e.preco ?? (a.preco || fechamentos[fechamentos.length - 1]) ?? 0;
+  const preco = fonte.preco ?? (a.preco || fechamentos[fechamentos.length - 1]) ?? 0;
   a.semCotacao = !(preco > 0);
   a.preco = preco;
   a.casas = casasPara(preco);
-  a.aberturaDia = e.abertura_hoje ?? fechamentos[fechamentos.length - 1] ?? preco;
-  a.variacaoDia = a.aberturaDia ? preco / a.aberturaDia - 1 : 0;
+  a.aberturaDia = fonte.abertura_hoje ?? fechamentos[fechamentos.length - 1] ?? preco;
+  // olheiro: variação de 24 h que a exchange informa; senão, desde a abertura da vela diária
+  a.variacaoDia = a.olheiro && Number.isFinite(a.par?.variacao_pct) ? a.par.variacao_pct / 100 : a.aberturaDia ? preco / a.aberturaDia - 1 : 0;
   a.historico = preco ? [...fechamentos, preco] : fechamentos;
   if (a.historico.length < 2) a.historico = [preco || 1, preco || 1];
   calcularMedias(a);
 }
 
+/** O que o piloto disse deste robô na última passada. */
+export function motivoDoRobo(ativo) {
+  if (ativo.olheiro) return ativo.par?.motivo ?? null;
+  const e = ativo.estrategia;
+  return e.auto_varrer ? e.motivo_par ?? e.auto_situacao : e.auto_situacao;
+}
+
 export function criarMercadoReal(dados) {
-  const ativos = dados.estrategias.map((e, i) => montarAtivo(e, i));
+  // um robô por estratégia e, com o piloto varrendo, mais um "olheiro" por par que ele está olhando
+  const ativos = [];
+  for (const e of dados.estrategias) {
+    ativos.push(montarAtivo(e, ativos.length));
+    for (const par of e.pares ?? []) ativos.push(montarAtivo(e, ativos.length, par));
+  }
   const relogio = { minutos: 0, dia: 1 };
   let agora = () => Date.now();
 
@@ -110,8 +129,14 @@ export function criarMercadoReal(dados) {
     /** Novos dados do servidor: preço, velas e o estado de cada estratégia. */
     atualizar(novos) {
       for (const e of novos.estrategias) {
-        const a = ativos.find((x) => x.estrategiaId === e.id);
-        if (a) atualizarAtivo(a, e);
+        const principal = ativos.find((x) => x.estrategiaId === e.id && !x.olheiro);
+        if (principal) atualizarAtivo(principal, e);
+        for (const par of e.pares ?? []) {
+          const olheiro = ativos.find((x) => x.estrategiaId === e.id && x.olheiro && x.simbolo === par.simbolo);
+          if (olheiro) atualizarAtivo(olheiro, e, par);
+        }
+        // olheiro que saiu da varredura (virou o par da estratégia ou perdeu volume) fica com o último dado
+        for (const o of ativos.filter((x) => x.estrategiaId === e.id && x.olheiro)) o.estrategia = e;
       }
     },
     usarRelogio(fn) {
@@ -171,6 +196,7 @@ export function propostaDoSinal(s, ativo) {
   return {
     real: true,
     sinalId: s.id,
+    simboloDoSinal: s.simbolo ?? null,
     lado,
     preco: Number(s.ordem?.preco ?? ativo.preco),
     motivo: motivoDoSinal(s),
