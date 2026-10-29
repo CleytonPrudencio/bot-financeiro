@@ -53,16 +53,41 @@ export async function cotacaoPublica(exchangeId: string, simbolo: string): Promi
   return preco;
 }
 
-/** Velas diárias públicas (as mais recentes por último). */
-export async function velasDiarias(exchangeId: string, simbolo: string, limite = 400) {
+export type TempoVela = '5m' | '15m' | '1h' | '4h' | '1d';
+export const MS_DA_VELA: Record<TempoVela, number> = { '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000, '1d': 86_400_000 };
+
+/** Velas públicas do tempo pedido (as mais recentes por último; a última ainda pode estar aberta). */
+export async function velas(exchangeId: string, simbolo: string, tempo: TempoVela, limite = 400) {
   const ex = await exchangePublica(exchangeId);
   if (!ex.has?.fetchOHLCV) throw new Error(`a ${exchangeId} não fornece velas (OHLCV)`);
   if (!ex.markets?.[simbolo]) throw new Error(`o par ${simbolo} não existe na ${exchangeId}`);
-  const desde = Date.now() - limite * 86_400_000;
-  const linhas = await ex.fetchOHLCV(simbolo, '1d', desde, limite);
+  const desde = Date.now() - limite * MS_DA_VELA[tempo];
+  const linhas = await ex.fetchOHLCV(simbolo, tempo, desde, limite);
   return linhas
     .filter((l) => l.every((x) => typeof x === 'number'))
     .map((l) => ({ t: l[0] as number, abre: l[1] as number, max: l[2] as number, min: l[3] as number, fecha: l[4] as number, volume: l[5] as number }));
+}
+
+/** Velas diárias públicas (as mais recentes por último). */
+export const velasDiarias = (exchangeId: string, simbolo: string, limite = 400) => velas(exchangeId, simbolo, '1d', limite);
+
+const MOEDAS_ESTAVEIS = new Set(['USDT', 'USDC', 'FDUSD', 'BUSD', 'TUSD', 'DAI', 'USDP', 'USD1', 'EUR', 'BRL', 'USD', 'PAXG', 'AEUR', 'EURI']);
+
+/**
+ * Pares à vista ativos cotados em `moeda` (ex.: BRL), sem moeda estável na base, com volume de 24 h
+ * de pelo menos `volumeMin` (na própria moeda de cotação). Do mais negociado para o menos.
+ */
+export async function paresDaMoeda(exchangeId: string, moeda: string, volumeMin: number): Promise<{ simbolo: string; volume: number }[]> {
+  const ex = await exchangePublica(exchangeId);
+  const simbolos = Object.values(ex.markets ?? {})
+    .filter((m) => m && m.spot && m.active !== false && m.quote === moeda && !MOEDAS_ESTAVEIS.has(String(m.base)))
+    .map((m) => m!.symbol);
+  if (!simbolos.length) return [];
+  const tickers = await ex.fetchTickers(simbolos);
+  return simbolos
+    .map((simbolo) => ({ simbolo, volume: Number(tickers[simbolo]?.quoteVolume ?? 0) }))
+    .filter((p) => p.volume >= volumeMin)
+    .sort((a, b) => b.volume - a.volume);
 }
 
 export class CorretoraCcxt implements Corretora {

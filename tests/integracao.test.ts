@@ -12,15 +12,22 @@ const URL_BANCO = process.env.TEST_DATABASE_URL;
 const PRECO = 50_000;
 let precoAgora = PRECO; // o teste do piloto derruba o preço para disparar o stop
 
+// velas que o teste da varredura do piloto põe no ETH/BRL (uma virada para alta)
+let velasEth: { t: number; abre: number; max: number; min: number; fecha: number; volume: number }[] | null = null;
+const serieAlta = () =>
+  Array.from({ length: 300 }, (_, i) => {
+    const f = PRECO * (0.8 + i / 1000);
+    return { t: Date.UTC(2026, 0, 1) + i * 86_400_000, abre: f, max: f * 1.01, min: f * 0.99, fecha: f, volume: 1000 };
+  });
+
 vi.mock('../src/brokers/ccxt.js', () => ({
   exchangesSuportadas: () => ['binance'],
-  exchangePublica: async () => ({ markets: { 'BTC/USDT': {} } }),
+  exchangePublica: async () => ({ markets: { 'BTC/USDT': {}, 'BTC/BRL': {}, 'ETH/BRL': {} } }),
   cotacaoPublica: async () => precoAgora,
-  velasDiarias: async () =>
-    Array.from({ length: 300 }, (_, i) => {
-      const f = PRECO * (0.8 + i / 1000);
-      return { t: Date.UTC(2026, 0, 1) + i * 86_400_000, abre: f, max: f * 1.01, min: f * 0.99, fecha: f, volume: 1000 };
-    }),
+  velasDiarias: async () => serieAlta(),
+  velas: async (_ex: string, simbolo: string, tempo: string) => (simbolo === 'ETH/BRL' && tempo !== '1d' && velasEth ? velasEth : serieAlta()),
+  paresDaMoeda: async () => [{ simbolo: 'BTC/BRL', volume: 9e6 }, { simbolo: 'ETH/BRL', volume: 5e6 }],
+  MS_DA_VELA: { '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000, '1d': 86_400_000 },
   CorretoraCcxt: class {
     constructor() {
       throw new Error('o teste não fala com exchange real');
@@ -362,8 +369,10 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
       simbolo: 'BTC/BRL', ativa: true, real: false, valor_ordem: 50, limite_diario: 50, limite_posicao: 50,
       ia_modo: 'obrigatorio', ia_tipo: 'agente', auto_ligado: true, auto_stop_pct: 3,
     });
-    // a série falsa é uma alta reta (IFR 100): o piloto olhou a vela e não entrou
-    expect(String(padroes[0]!.auto_situacao)).toContain('sem entrada');
+    expect(padroes[0]).toMatchObject({ auto_varrer: true, auto_tempo: '15m', auto_intervalo_min: 2 });
+    // a série falsa é uma alta reta (IFR 100): o piloto olhou os pares e não entrou
+    expect(String(padroes[0]!.auto_situacao)).toContain('olhou 2 pares em velas de 15m: nenhum virou para alta');
+    expect(String(padroes[0]!.auto_situacao)).toContain('IFR esticado');
     expect(await saldo('BRL')).toBe(50);
   });
 
@@ -398,6 +407,46 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     expect(ultimo!.corpo.id).toMatch(/^piloto-stop-/);
     const [e] = await db.query<{ auto_situacao: string }>('select auto_situacao from estrategias where id = $1', [est.corpo.id]);
     expect(e!.auto_situacao).toContain('stop de perda');
+  });
+
+  it('piloto varre os pares da moeda, troca para o que virou para alta e compra', async () => {
+    const { rodadaPiloto, PADRAO } = await import('../src/piloto/index.js');
+    const { avaliarEntrada } = await import('../src/piloto/regras.js');
+    await db.query('update estrategias set ativa = false where nome = $1', [PADRAO.nome]); // não disputa o saldo
+    // a mesma série do teste das regras: alta longa, um tombo e a retomada; corta no dia da virada
+    const s: number[] = [];
+    for (let i = 0; i < 240; i++) s.push(100 + i * 0.3);
+    for (let i = 0; i < 12; i++) s.push(s[s.length - 1]! * 0.985);
+    for (let i = 0; i < 30; i++) s.push(s[s.length - 1]! * 1.006);
+    const vela = (f: number, i: number) => ({ t: Date.UTC(2026, 9, 1) + i * 900_000, abre: f, max: f * 1.01, min: f * 0.99, fecha: f, volume: 1 });
+    let n = 202;
+    while (n <= s.length && !avaliarEntrada(s.slice(0, n).map(vela)).comprar) n++;
+    expect(n).toBeLessThanOrEqual(s.length);
+    velasEth = s.slice(0, n).map(vela);
+
+    const [conta] = await db.query<{ id: number }>(`select id from contas where nome = 'Binance simulada'`);
+    const est = await painel('POST', '/estrategias', {
+      nome: 'Varredura', conta_id: conta!.id, simbolo: 'BTC/BRL', ativa: true, valor_ordem: 10, limite_por_ordem: 10, limite_diario: 10,
+      intervalo_min_seg: 0, auto_ligado: true, auto_varrer: true, auto_tempo: '15m', auto_intervalo_min: 2,
+    });
+    expect(est.status).toBe(201);
+    try {
+      await rodadaPiloto();
+    } finally {
+      velasEth = null;
+    }
+    const [e] = await db.query<{ simbolo: string; auto_situacao: string }>('select simbolo, auto_situacao from estrategias where id = $1', [est.corpo.id]);
+    expect(e!.simbolo).toBe('ETH/BRL');
+    expect(e!.auto_situacao).toMatch(/^ETH\/BRL: virada para alta.*Kronos 72% de alta → executado/);
+    const [ultimo] = await db.query<{ situacao: string; corpo: { simbolo: string; id: string } }>(
+      'select situacao, corpo from sinais where estrategia_id = $1 order by id desc limit 1', [est.corpo.id]);
+    expect(ultimo).toMatchObject({ situacao: 'executado', corpo: { simbolo: 'ETH/BRL' } });
+    expect(ultimo!.corpo.id).toMatch(/^piloto-entrada-ETH\/BRL-/);
+
+    // na passada seguinte, dentro dos 2 minutos, não varre de novo; com posição, só cuida do stop
+    await rodadaPiloto();
+    const sinais = await db.query('select 1 from sinais where estrategia_id = $1', [est.corpo.id]);
+    expect(sinais).toHaveLength(1);
   });
 
   it('auditoria registrou as ações do painel', async () => {

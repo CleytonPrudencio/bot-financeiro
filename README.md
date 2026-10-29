@@ -174,16 +174,24 @@ Para quem não tem TradingView: o próprio bot gera os sinais das estratégias c
 (`src/piloto/`) e manda pelo mesmo caminho do webhook (`processarSinalDa`). Então valem todas as
 regras de risco, a trava por estratégia, o agente de IA nas compras e as três chaves do dinheiro real.
 
-- **Entrada**, uma vez por vela diária **fechada**, só na virada: preço acima das médias de 20 e
-  200 dias, média de 50 acima da de 200, MACD positivo e IFR entre 40 e 70, numa vela que ontem não
-  cumpria tudo. Antes de chamar as IAs, o Kronos precisa dar 50% ou mais de chance de alta (corte
-  barato: as IAs só são consultadas poucas vezes por mês).
+- **Quando olha**: sem posição, a cada `auto_intervalo_min` (padrão 2 min), sempre na última vela
+  **fechada** do tempo escolhido (5 min, 15 min, 1 h, 4 h ou 1 dia).
+- **Onde olha**: no par da estratégia ou, com **"procurar em todos os pares da moeda"**, em todos os
+  pares à vista da moeda da conta com volume de 24 h acima do mínimo (ex.: tudo em BRL na Binance, sem
+  moedas estáveis). Opera o melhor, **um de cada vez**: a estratégia troca de par sozinha, só sem
+  posição aberta.
+- **Entrada**, só na virada: preço acima das médias de 20 e 200 velas, média de 50 acima da de 200,
+  MACD positivo e IFR entre 40 e 70, numa vela em que a anterior não cumpria tudo. Com velas curtas,
+  a tendência diária também precisa estar a favor (acima da média de 50 dias). O Kronos precisa dar
+  50% ou mais de chance de alta; entre vários pares, vai para o agente o de maior chance. Teto de
+  consultas à IA por dia (`auto_max_ia_dia`, padrão 6) e o par barrado descansa 6 h.
 - **Saída**, a cada minuto, sem IA (`conferirSaida` em `src/risco.ts`): stop de perda (padrão 3%),
   alvo (6%), proteção do ganho (depois de +2,5%, um recuo de 1,5% do topo fecha, nunca abaixo do
-  preço médio mais as taxas) e, na vela diária, fechamento abaixo da média de 50 dias.
-- **Estratégia padrão**: na primeira conta Binance, o bot cria uma vez "Piloto BTC/BRL (padrão)":
-  R$ 50 por ordem, por dia e de posição; agente em etapas obrigatório; piloto ligado; em
-  **simulação** (com R$ 50 de saldo simulado). Operar real é decisão do dono.
+  preço médio mais as taxas) e, uma vez por dia, fechamento abaixo da média de 50 dias.
+- **Estratégia padrão**: na primeira conta Binance, o bot cria uma vez "Piloto Binance em reais
+  (padrão)": R$ 50 por ordem, por dia e de posição; todos os pares em BRL, a cada 2 min, velas de
+  15 min; agente em etapas obrigatório; em **simulação** (com R$ 50 de saldo simulado). Operar real
+  é decisão do dono.
 
 Nenhuma regra garante lucro: o stop limita a perda de cada operação, não evita que ela aconteça.
 

@@ -66,6 +66,9 @@ function montarAtivo(e, indice) {
 function atualizarAtivo(a, e) {
   a.estrategia = e;
   a.nome = e.nome;
+  // a varredura do piloto troca o par da estratégia quando entra numa oportunidade
+  a.simbolo = e.simbolo;
+  a.moeda = moedaDe(e.simbolo);
   const fechamentos = (e.fechamentos ?? []).filter((x) => Number.isFinite(x) && x > 0);
   // sem cotação agora: fica a última conhecida
   const preco = e.preco ?? (a.preco || fechamentos[fechamentos.length - 1]) ?? 0;
