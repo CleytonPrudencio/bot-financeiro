@@ -9,6 +9,10 @@ import { logger } from './logger.js';
 // com folga na precisão do double)
 pg.types.setTypeParser(1700, (v) => Number(v));
 pg.types.setTypeParser(20, (v) => Number(v));
+// bigint[] (ids de conectores de IA) também vira number[]
+// (os ids de tipo de array não estão no enum dos tipos do pg: 1009 = text[], 1016 = int8[])
+const lerListaTexto = pg.types.getTypeParser(1009 as never) as (v: string) => string[];
+pg.types.setTypeParser(1016 as never, (v: string) => lerListaTexto(v).map(Number));
 
 export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 10 });
 

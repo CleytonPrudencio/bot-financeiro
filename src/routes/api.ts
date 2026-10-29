@@ -8,6 +8,10 @@ import { query, transacao, umOuNada } from '../db.js';
 import { corretoraReal, type Conta, type Estrategia } from '../motor.js';
 import { cotacaoPublica, exchangePublica, exchangesSuportadas } from '../brokers/ccxt.js';
 import { moedas } from '../brokers/tipos.js';
+import {
+  consultarIas, MODELOS_CLAUDE, pedirParecer, perguntarIas, PEDIDO_DE_TESTE, PRESETS_COMPATIVEIS,
+  type ConectorIa, type PedidoParecer,
+} from '../ia/index.js';
 
 const chave = derivarChave(config.chaveCifra);
 
@@ -65,6 +69,16 @@ function validar<T>(esquema: z.ZodType<T>, corpo: unknown): T {
   return r.data;
 }
 
+/**
+ * Para PATCH: fica só com os campos que vieram no corpo. Sem isto, os `.default()` do esquema
+ * preenchem o que não veio (editar o nome de uma estratégia a desativava; de uma conta real, a
+ * voltava para simulação).
+ */
+function soEnviados<T extends object>(dados: T, corpo: unknown): Partial<T> {
+  const enviados = corpo && typeof corpo === 'object' ? corpo : {};
+  return Object.fromEntries(Object.entries(dados).filter(([k]) => Object.hasOwn(enviados, k))) as Partial<T>;
+}
+
 /** Conta como o painel vê: nunca devolve as chaves, só se existem. */
 function contaPublica(c: Conta) {
   return {
@@ -101,12 +115,60 @@ api.get('/resumo', async (_req, res) => {
        left join posicoes p on p.estrategia_id = e.id
       order by e.ativa desc, e.nome`,
   );
+  // últimos 14 dias, um ponto por dia (fuso de São Paulo), para o gráfico do painel
+  const serie = await query(
+    `with dias as (
+       select generate_series((now() at time zone $1)::date - 13, (now() at time zone $1)::date, '1 day')::date as dia
+     )
+     select to_char(d.dia, 'YYYY-MM-DD') as dia,
+            coalesce(sum(o.custo) filter (where o.lado = 'compra'), 0) as compras,
+            coalesce(sum(o.custo - o.taxa) filter (where o.lado = 'venda'), 0) as vendas,
+            count(o.id) as ordens
+       from dias d
+       left join ordens o on o.situacao = 'executada' and (o.criada_em at time zone $1)::date = d.dia
+      group by d.dia order by d.dia`,
+    [config.fuso],
+  );
+  const sinais7d = await query<{ situacao: string; total: number }>(
+    `select situacao, count(*) as total from sinais where recebido_em >= now() - interval '7 days' group by situacao`,
+  );
+  const ultimas = await query(
+    `select o.id, o.criada_em, o.lado, o.simbolo, o.custo, o.modo, o.situacao, e.nome as estrategia
+       from ordens o join estrategias e on e.id = o.estrategia_id order by o.criada_em desc limit 8`,
+  );
+  const [ias] = await query<{ ativas: number; total: number }>(
+    'select count(*) filter (where ativo) as ativas, count(*) as total from conectores_ia',
+  );
   res.json({
     parada_geral: parada?.valor === true,
     real_no_servidor: config.realLiberadoNoServidor,
     hoje,
     estrategias,
+    serie,
+    sinais7d,
+    ultimas,
+    ias,
   });
+});
+
+// Cotação dos pares das estratégias, para a faixa de cotações do painel. Guarda 20 s.
+let cacheCotacoes: { em: number; dados: unknown } | null = null;
+api.get('/cotacoes', async (_req, res) => {
+  if (cacheCotacoes && Date.now() - cacheCotacoes.em < 20_000) return void res.json(cacheCotacoes.dados);
+  const pares = await query<{ exchange: string; simbolo: string }>(
+    `select distinct c.exchange, e.simbolo from estrategias e join contas c on c.id = e.conta_id order by 1, 2 limit 12`,
+  );
+  const dados = await Promise.all(
+    pares.map(async (p) => {
+      try {
+        return { ...p, cotacao: await cotacaoPublica(p.exchange, p.simbolo) };
+      } catch {
+        return { ...p, cotacao: null };
+      }
+    }),
+  );
+  cacheCotacoes = { em: Date.now(), dados };
+  res.json(dados);
 });
 
 api.post('/parada', async (req, res) => {
@@ -171,8 +233,8 @@ api.post('/contas', async (req, res) => {
 
 api.patch('/contas/:id', async (req, res) => {
   const contaId = id(req);
-  const d = validar(
-    esquemaConta.omit({ saldo_inicial: true, exchange: true }).partial().extend({ apagar_chaves: z.boolean().optional() }),
+  const d = soEnviados(
+    validar(esquemaConta.omit({ saldo_inicial: true, exchange: true }).partial().extend({ apagar_chaves: z.boolean().optional() }), req.body),
     req.body,
   );
   const atual = await umOuNada<Conta>('select * from contas where id = $1', [contaId]);
@@ -262,6 +324,13 @@ const esquemaEstrategia = z
     intervalo_min_seg: z.number().int().min(0).max(86_400).default(60),
     desvio_max_pct: z.number().min(0.01).max(50).default(1),
     ips_permitidos: z.string().trim().max(1000).nullable().default(null),
+    ia_modo: z.enum(['desligado', 'consultivo', 'obrigatorio']).default('desligado'),
+    ia_conectores: z.array(z.number().int().positive()).max(20).default([]),
+    ia_quorum: z.number().int().min(1).max(20).nullable().default(null),
+    ia_falha: z.enum(['reprova', 'ignora']).default('reprova'),
+    ia_confianca_min: z.number().min(0).max(1).default(0.6),
+    ia_nas_vendas: z.boolean().default(false),
+    ia_contexto: z.string().trim().max(2000).nullable().default(null),
   });
 
 function conferirLimites(e: { valor_ordem: number; limite_por_ordem: number; limite_diario: number }): void {
@@ -284,10 +353,14 @@ api.get('/estrategias', async (_req, res) => {
   res.json(
     await query(
       `select e.*, c.nome as conta, c.modo as conta_modo, c.exchange,
-              coalesce(p.quantidade, 0) as posicao, coalesce(p.custo_total, 0) as custo_posicao
+              coalesce(p.quantidade, 0) as posicao, coalesce(p.custo_total, 0) as custo_posicao,
+              (select coalesce(sum(o.custo), 0) from ordens o
+                where o.estrategia_id = e.id and o.situacao = 'executada' and o.lado = 'compra'
+                  and o.criada_em >= (date_trunc('day', now() at time zone $1) at time zone $1)) as gasto_hoje
          from estrategias e join contas c on c.id = e.conta_id
          left join posicoes p on p.estrategia_id = e.id
         order by e.nome`,
+      [config.fuso],
     ).then((linhas) => linhas.map(({ token_hash: _omitido, ...resto }) => resto)),
   );
 });
@@ -302,10 +375,12 @@ api.post('/estrategias', async (req, res) => {
   const t = novoToken();
   const r = await query<Estrategia>(
     `insert into estrategias (nome, conta_id, simbolo, ativa, real, token_hash, token_prefixo, valor_ordem, limite_por_ordem,
-                              limite_diario, limite_posicao, intervalo_min_seg, desvio_max_pct, ips_permitidos)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning id`,
+                              limite_diario, limite_posicao, intervalo_min_seg, desvio_max_pct, ips_permitidos,
+                              ia_modo, ia_conectores, ia_quorum, ia_falha, ia_confianca_min, ia_nas_vendas, ia_contexto)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) returning id`,
     [d.nome, d.conta_id, d.simbolo, d.ativa, d.real, t.hash, t.prefixo, d.valor_ordem, d.limite_por_ordem,
-      d.limite_diario, d.limite_posicao, d.intervalo_min_seg, d.desvio_max_pct, d.ips_permitidos || null],
+      d.limite_diario, d.limite_posicao, d.intervalo_min_seg, d.desvio_max_pct, d.ips_permitidos || null,
+      d.ia_modo, d.ia_conectores, d.ia_quorum, d.ia_falha, d.ia_confianca_min, d.ia_nas_vendas, d.ia_contexto || null],
   );
   await evento(req.usuarioId, 'estrategia_criada', { estrategia: r[0]!.id, real: d.real });
   // o token só aparece agora; no banco fica só o hash
@@ -316,7 +391,7 @@ api.patch('/estrategias/:id', async (req, res) => {
   const estId = id(req);
   const atual = await umOuNada<Estrategia>('select * from estrategias where id = $1', [estId]);
   if (!atual) return void res.status(404).json({ erro: 'estratégia não existe' });
-  const d = validar(esquemaEstrategia.omit({ conta_id: true }).partial(), req.body);
+  const d = soEnviados(validar(esquemaEstrategia.omit({ conta_id: true }).partial(), req.body), req.body);
   const novo = { ...atual, ...d };
   conferirLimites(novo);
   const conta = (await umOuNada<Conta>('select * from contas where id = $1', [atual.conta_id]))!;
@@ -328,10 +403,14 @@ api.patch('/estrategias/:id', async (req, res) => {
   }
   await query(
     `update estrategias set nome = $2, simbolo = $3, ativa = $4, real = $5, valor_ordem = $6, limite_por_ordem = $7,
-            limite_diario = $8, limite_posicao = $9, intervalo_min_seg = $10, desvio_max_pct = $11, ips_permitidos = $12
+            limite_diario = $8, limite_posicao = $9, intervalo_min_seg = $10, desvio_max_pct = $11, ips_permitidos = $12,
+            ia_modo = $13, ia_conectores = $14, ia_quorum = $15, ia_falha = $16, ia_confianca_min = $17,
+            ia_nas_vendas = $18, ia_contexto = $19
       where id = $1`,
     [estId, novo.nome, novo.simbolo, novo.ativa, novo.real, novo.valor_ordem, novo.limite_por_ordem, novo.limite_diario,
-      novo.limite_posicao, novo.intervalo_min_seg, novo.desvio_max_pct, novo.ips_permitidos || null],
+      novo.limite_posicao, novo.intervalo_min_seg, novo.desvio_max_pct, novo.ips_permitidos || null,
+      novo.ia_modo, novo.ia_conectores, novo.ia_quorum, novo.ia_falha, novo.ia_confianca_min, novo.ia_nas_vendas,
+      novo.ia_contexto || null],
   );
   await evento(req.usuarioId, 'estrategia_alterada', { estrategia: estId, mudou: d });
   res.json({ ok: true });
@@ -368,7 +447,11 @@ api.get('/sinais', async (req, res) => {
   const f = validar(filtro, req.query);
   res.json(
     await query(
-      `select s.id, s.estrategia_id, e.nome as estrategia, s.acao, s.situacao, s.motivo, s.ip, s.corpo, s.recebido_em
+      `select s.id, s.estrategia_id, e.nome as estrategia, s.acao, s.situacao, s.motivo, s.ip, s.corpo, s.recebido_em,
+              (select coalesce(json_agg(json_build_object(
+                        'conector', p.conector_nome, 'modelo', p.modelo, 'decisao', p.decisao, 'confianca', p.confianca,
+                        'motivo', p.motivo, 'erro', p.erro, 'ms', p.ms) order by p.id), '[]'::json)
+                 from pareceres_ia p where p.sinal_id = s.id) as pareceres
          from sinais s left join estrategias e on e.id = s.estrategia_id
         where ($1::bigint is null or s.estrategia_id = $1)
         order by s.recebido_em desc limit $2`,
@@ -396,6 +479,158 @@ api.get('/eventos', async (_req, res) => {
          left join usuarios u on u.id = ev.usuario_id order by ev.criado_em desc limit 200`,
     ),
   );
+});
+
+// ------------------------------------------------------------------ conectores de IA
+
+const esquemaConector = z.object({
+  nome: z.string().trim().min(1).max(80),
+  provedor: z.enum(['anthropic', 'openai']),
+  url_base: z.string().trim().max(300).nullable().optional(),
+  modelo: z.string().trim().min(1).max(120),
+  api_key: textoChave.optional(),
+  esforco: z.enum(['low', 'medium', 'high']).default('low'),
+  timeout_seg: z.number().int().min(3).max(120).default(25),
+  instrucoes: z.string().trim().max(2000).nullable().optional(),
+  ativo: z.boolean().default(true),
+});
+
+/** A chave vai junto em cada pedido: só https, menos para endereço interno (Ollama da VM, localhost). */
+function conferirUrl(provedor: string, url: string | null | undefined): string | null {
+  if (provedor === 'anthropic') return null;
+  if (!url) throw new ErroPedido('informe a URL base da API (ex. https://api.openai.com/v1)');
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    throw new ErroPedido('URL base inválida');
+  }
+  const interno = u.hostname === 'localhost' || u.hostname === '127.0.0.1' || !u.hostname.includes('.');
+  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && interno)) {
+    throw new ErroPedido('use https (http só para endereço interno, como o Ollama da VM)');
+  }
+  if (u.username || u.password) throw new ErroPedido('não ponha usuário e senha na URL; use o campo da chave');
+  return u.toString().replace(/\/+$/, '');
+}
+
+/** Conector como o painel vê: a chave nunca volta, só se existe. */
+function conectorPublico({ api_key_cifrada, ...resto }: ConectorIa) {
+  return { ...resto, tem_chave: Boolean(api_key_cifrada) };
+}
+
+async function conectoresEscolhidos(ids: number[] | undefined): Promise<ConectorIa[]> {
+  const lista = await query<ConectorIa>(
+    'select * from conectores_ia where ativo and (cardinality($1::bigint[]) = 0 or id = any($1::bigint[])) order by id',
+    [ids ?? []],
+  );
+  if (!lista.length) throw new ErroPedido('nenhum conector de IA ativo');
+  return lista;
+}
+
+api.get('/ias/opcoes', (_req, res) => {
+  res.json({ claude: MODELOS_CLAUDE, compativeis: PRESETS_COMPATIVEIS });
+});
+
+api.get('/ias', async (_req, res) => {
+  res.json((await query<ConectorIa>('select * from conectores_ia order by ativo desc, nome')).map(conectorPublico));
+});
+
+api.post('/ias', async (req, res) => {
+  const d = validar(esquemaConector, req.body);
+  const url = conferirUrl(d.provedor, d.url_base);
+  if (d.provedor === 'anthropic' && !d.api_key) throw new ErroPedido('o Claude precisa da chave de API da Anthropic');
+  const [c] = await query<ConectorIa>(
+    `insert into conectores_ia (nome, provedor, url_base, modelo, api_key_cifrada, esforco, timeout_seg, instrucoes, ativo)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning *`,
+    [d.nome, d.provedor, url, d.modelo, d.api_key ? cifrar(d.api_key, chave) : null, d.esforco, d.timeout_seg, d.instrucoes || null, d.ativo],
+  );
+  await evento(req.usuarioId, 'ia_criada', { conector: c!.id, provedor: d.provedor, modelo: d.modelo });
+  res.status(201).json(conectorPublico(c!));
+});
+
+api.patch('/ias/:id', async (req, res) => {
+  const iaId = id(req);
+  const atual = await umOuNada<ConectorIa>('select * from conectores_ia where id = $1', [iaId]);
+  if (!atual) return void res.status(404).json({ erro: 'conector não existe' });
+  const d = soEnviados(validar(esquemaConector.omit({ provedor: true }).partial().extend({ apagar_chave: z.boolean().optional() }), req.body), req.body);
+  const url = d.url_base !== undefined ? conferirUrl(atual.provedor, d.url_base) : atual.url_base;
+  const novaChave = d.apagar_chave ? null : d.api_key ? cifrar(d.api_key, chave) : atual.api_key_cifrada;
+  if (atual.provedor === 'anthropic' && !novaChave) throw new ErroPedido('o Claude precisa da chave de API da Anthropic');
+  const [c] = await query<ConectorIa>(
+    `update conectores_ia set nome = $2, url_base = $3, modelo = $4, api_key_cifrada = $5, esforco = $6, timeout_seg = $7,
+            instrucoes = $8, ativo = $9 where id = $1 returning *`,
+    [iaId, d.nome ?? atual.nome, url, d.modelo ?? atual.modelo, novaChave, d.esforco ?? atual.esforco,
+      d.timeout_seg ?? atual.timeout_seg, d.instrucoes !== undefined ? d.instrucoes || null : atual.instrucoes, d.ativo ?? atual.ativo],
+  );
+  await evento(req.usuarioId, 'ia_alterada', {
+    conector: iaId,
+    campos: Object.keys(d).filter((k) => k !== 'api_key'),
+    chave_trocada: Boolean(d.api_key || d.apagar_chave),
+  });
+  res.json(conectorPublico(c!));
+});
+
+api.delete('/ias/:id', async (req, res) => {
+  const iaId = id(req);
+  await transacao(async (c) => {
+    await c.query('update estrategias set ia_conectores = array_remove(ia_conectores, $1::bigint) where $1::bigint = any(ia_conectores)', [iaId]);
+    await c.query('delete from conectores_ia where id = $1', [iaId]);
+  });
+  await evento(req.usuarioId, 'ia_apagada', { conector: iaId });
+  res.json({ ok: true });
+});
+
+// Cada pergunta às IAs custa dinheiro na conta do provedor: limite curto.
+const limiteIa = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false });
+
+api.post('/ias/:id/testar', limiteIa, async (req, res) => {
+  const iaId = id(req);
+  const c = await umOuNada<ConectorIa>('select * from conectores_ia where id = $1', [iaId]);
+  if (!c) return void res.status(404).json({ erro: 'conector não existe' });
+  const r = await pedirParecer(c, PEDIDO_DE_TESTE);
+  const teste = { ok: r.ok, ms: r.ms, em: new Date().toISOString(), ...(r.ok ? {} : { erro: r.erro }) };
+  await query('update conectores_ia set ultimo_teste = $2 where id = $1', [iaId, JSON.stringify(teste)]);
+  res.json(r);
+});
+
+api.post('/ias/perguntar', limiteIa, async (req, res) => {
+  const d = validar(z.object({ pergunta: z.string().trim().min(2).max(4000), conectores: z.array(z.number().int().positive()).max(20).optional() }), req.body);
+  const conectores = await conectoresEscolhidos(d.conectores);
+  await evento(req.usuarioId, 'ia_pergunta', { conectores: conectores.map((c) => c.id), tamanho: d.pergunta.length });
+  res.json(await perguntarIas(conectores, d.pergunta));
+});
+
+/** Parecer avulso (o escritório virtual usa para a reunião com o chefe). Não executa nada. */
+api.post('/ias/parecer', limiteIa, async (req, res) => {
+  const d = validar(
+    z.object({
+      simbolo: z.string().trim().min(1).max(40),
+      lado: z.enum(['compra', 'venda']),
+      cotacao: z.number().positive(),
+      valor: z.number().positive().optional(),
+      quantidade: z.number().positive().optional(),
+      contexto: z.string().trim().max(1000).optional(),
+      extras: z.record(z.string(), z.union([z.string().max(300), z.number(), z.boolean(), z.null()])).optional(),
+      conectores: z.array(z.number().int().positive()).max(20).optional(),
+    }),
+    req.body,
+  );
+  const conectores = await conectoresEscolhidos(d.conectores);
+  const pedido: PedidoParecer = {
+    estrategia: 'escritório virtual (dados fictícios)',
+    contexto: d.contexto ?? null,
+    simbolo: d.simbolo,
+    lado: d.lado,
+    modo: 'simulacao',
+    ...(d.valor !== undefined ? { valor: d.valor } : {}),
+    ...(d.quantidade !== undefined ? { quantidade: d.quantidade } : {}),
+    cotacao: d.cotacao,
+    posicao: { quantidade: 0, custo_total: 0 },
+    gasto_hoje: 0,
+    limite_diario: 0,
+    ...(d.extras ? { extras: d.extras } : {}),
+  };
+  res.json(await consultarIas(conectores, pedido));
 });
 
 // ------------------------------------------------------------------ erros

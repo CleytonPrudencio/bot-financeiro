@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { avaliar, ipPermitido, type EstadoRisco } from '../src/risco.js';
+import { avaliar, consultaIa, decidirComIa, ipPermitido, type EstadoRisco, type PoliticaIa } from '../src/risco.js';
 import type { Sinal } from '../src/sinal.js';
 
 function estado(mudar: Partial<EstadoRisco> = {}, est: Partial<EstadoRisco['estrategia']> = {}): EstadoRisco {
@@ -123,5 +123,54 @@ describe('ipPermitido', () => {
     expect(ipPermitido(null, '')).toBe(true);
     expect(ipPermitido('::ffff:52.89.214.238', '52.89.214.238')).toBe(true);
     expect(ipPermitido(null, '52.89.214.238')).toBe(false);
+  });
+});
+
+describe('parecer das IAs', () => {
+  const politica = (p: Partial<PoliticaIa> = {}): PoliticaIa => ({
+    modo: 'obrigatorio', quorum: null, falha: 'reprova', confiancaMin: 0.6, nasVendas: false, ...p,
+  });
+  const sim = (confianca = 0.8) => ({ ok: true as const, decisao: 'aprovar' as const, confianca });
+  const nao = (confianca = 0.8) => ({ ok: true as const, decisao: 'vetar' as const, confianca });
+  const falhou = { ok: false as const };
+
+  it('só compras passam pela IA, a não ser que a estratégia peça vendas também; zerar nunca', () => {
+    expect(consultaIa('comprar', politica())).toBe(true);
+    expect(consultaIa('vender', politica())).toBe(false);
+    expect(consultaIa('vender', politica({ nasVendas: true }))).toBe(true);
+    expect(consultaIa('zerar', politica({ nasVendas: true }))).toBe(false);
+    expect(consultaIa('comprar', politica({ modo: 'desligado' }))).toBe(false);
+  });
+
+  it('sem quorum, precisa de todas', () => {
+    expect(decidirComIa([sim(), sim()], politica()).aprovado).toBe(true);
+    expect(decidirComIa([sim(), nao()], politica()).aprovado).toBe(false);
+  });
+
+  it('quorum: maioria basta', () => {
+    expect(decidirComIa([sim(), sim(), nao()], politica({ quorum: 2 })).aprovado).toBe(true);
+    expect(decidirComIa([sim(), nao(), nao()], politica({ quorum: 2 })).aprovado).toBe(false);
+  });
+
+  it('aprovação com pouca confiança não conta', () => {
+    expect(decidirComIa([sim(0.5)], politica()).aprovado).toBe(false);
+    expect(decidirComIa([sim(0.6)], politica()).aprovado).toBe(true);
+  });
+
+  it('falha: "reprova" conta como não aprovou; "ignora" tira da conta', () => {
+    expect(decidirComIa([sim(), falhou], politica()).aprovado).toBe(false);
+    expect(decidirComIa([sim(), falhou], politica({ falha: 'ignora' })).aprovado).toBe(true);
+    expect(decidirComIa([falhou, falhou], politica({ falha: 'ignora' })).aprovado).toBe(true);
+    expect(decidirComIa([falhou, falhou], politica()).aprovado).toBe(false);
+  });
+
+  it('obrigatória sem nenhum conector: não sai (falha fechada)', () => {
+    const d = decidirComIa([], politica({ falha: 'ignora' }));
+    expect(d.aprovado).toBe(false);
+    expect(d.motivo).toMatch(/nenhum conector/);
+  });
+
+  it('consultiva nunca barra', () => {
+    expect(decidirComIa([nao(), nao()], politica({ modo: 'consultivo' }))).toMatchObject({ aprovado: true });
   });
 });

@@ -5,7 +5,7 @@
 //   TEST_DATABASE_URL=postgres://postgres@localhost:5432/bot_teste npm test
 
 import type { AddressInfo } from 'node:net';
-import type { Server } from 'node:http';
+import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const URL_BANCO = process.env.TEST_DATABASE_URL;
@@ -28,6 +28,12 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
   let cookie = '';
   let token = '';
   let db: typeof import('../src/db.js');
+
+  // IA falsa no formato da API da OpenAI, para testar o conector compatível de ponta a ponta
+  let iaFalsa: Server;
+  let urlIa = '';
+  let respostaIa = '{"decisao":"vetar","confianca":0.9,"motivo":"teste"}';
+  const pedidosIa: { auth?: string; corpo: { messages: { content: string }[] } }[] = [];
 
   const painel = async (metodo: string, caminho: string, corpo?: unknown) => {
     const r = await fetch(base + '/api' + caminho, {
@@ -63,6 +69,16 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     await db.migrar();
     const { hashSenha } = await import('../src/auth.js');
     await db.query('insert into usuarios (email, senha_hash) values ($1, $2)', ['dono@teste.com', await hashSenha('senha-boa')]);
+    iaFalsa = createServer((req, res) => {
+      let corpo = '';
+      req.on('data', (p) => (corpo += p));
+      req.on('end', () => {
+        pedidosIa.push({ auth: req.headers.authorization, corpo: JSON.parse(corpo) });
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ choices: [{ message: { content: respostaIa } }] }));
+      });
+    }).listen(0);
+    urlIa = `http://127.0.0.1:${(iaFalsa.address() as AddressInfo).port}/v1`;
     const { criarApp } = await import('../src/app.js');
     servidor = criarApp().listen(0);
     base = `http://127.0.0.1:${(servidor.address() as AddressInfo).port}`;
@@ -70,6 +86,7 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
 
   afterAll(async () => {
     servidor?.close();
+    iaFalsa?.close();
     await db?.pool.end();
   });
 
@@ -179,6 +196,61 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     expect((await sinal({ acao: 'zerar' })).corpo).toMatchObject({ situacao: 'rejeitado' });
     await painel('POST', '/parada', { ligada: false });
     expect((await sinal({ acao: 'zerar' })).corpo).toMatchObject({ situacao: 'executado' });
+  });
+
+  it('conector de IA: https obrigatório fora da rede interna e a chave nunca volta', async () => {
+    expect((await painel('POST', '/ias', { nome: 'x', provedor: 'openai', url_base: 'http://exemplo.com/v1', modelo: 'm' })).status).toBe(400);
+    expect((await painel('POST', '/ias', { nome: 'x', provedor: 'anthropic', modelo: 'claude-haiku-5-5' })).status).toBe(400);
+    const c = await painel('POST', '/ias', { nome: 'IA falsa', provedor: 'openai', url_base: urlIa, modelo: 'falso-1', api_key: 'sk-segredo-de-teste-123' });
+    expect(c.status).toBe(201);
+    expect(c.corpo).toMatchObject({ tem_chave: true });
+    const lista = await painel('GET', '/ias');
+    expect(JSON.stringify(lista.corpo)).not.toContain('segredo');
+    expect(JSON.stringify(lista.corpo)).not.toContain('api_key_cifrada');
+  });
+
+  it('IA obrigatória barra a compra; o parecer fica gravado no sinal', async () => {
+    await db.query('update estrategias set limite_diario = 10000');
+    const [est] = await db.query<{ id: number }>('select id from estrategias');
+    expect((await painel('PATCH', `/estrategias/${est!.id}`, { ia_modo: 'obrigatorio' })).status).toBe(200);
+    // PATCH só muda o que veio: a estratégia continua ativa e com os mesmos limites
+    expect((await db.query('select ativa, limite_diario from estrategias'))[0]).toEqual({ ativa: true, limite_diario: 10000 });
+    respostaIa = '```json\n{"decisao":"vetar","confianca":0.9,"motivo":"tendência de baixa"}\n```';
+    const r = await sinal({ acao: 'comprar', id: 'ia1' });
+    expect(r.corpo).toMatchObject({ situacao: 'rejeitado' });
+    expect(String(r.corpo.motivo)).toMatch(/^IA barrou/);
+    expect(pedidosIa.at(-1)!.auth).toBe('Bearer sk-segredo-de-teste-123');
+    expect(pedidosIa.at(-1)!.corpo.messages[1]!.content).toContain('BTC/USDT');
+    const sinais = await painel('GET', '/sinais?limite=1');
+    expect((sinais.corpo as unknown as { pareceres: unknown[] }[])[0]!.pareceres).toMatchObject([
+      { conector: 'IA falsa', decisao: 'vetar', confianca: 0.9, motivo: 'tendência de baixa' },
+    ]);
+  });
+
+  it('IA aprova com confiança suficiente: a ordem sai; zerar não consulta IA', async () => {
+    respostaIa = '{"decisao":"aprovar","confianca":0.4,"motivo":"fraco"}';
+    expect((await sinal({ acao: 'comprar', id: 'ia2' })).corpo).toMatchObject({ situacao: 'rejeitado' });
+    respostaIa = '{"decisao":"aprovar","confianca":0.85,"motivo":"ok"}';
+    expect((await sinal({ acao: 'comprar', id: 'ia3' })).corpo).toMatchObject({ situacao: 'executado' });
+    const antes = pedidosIa.length;
+    expect((await sinal({ acao: 'zerar', id: 'ia4' })).corpo).toMatchObject({ situacao: 'executado' });
+    expect(pedidosIa.length).toBe(antes);
+  });
+
+  it('IA que não responde JSON conta como falha e, na política padrão, reprova', async () => {
+    respostaIa = 'não sei';
+    const r = await sinal({ acao: 'comprar', id: 'ia5' });
+    expect(r.corpo).toMatchObject({ situacao: 'rejeitado' });
+    expect(String(r.corpo.motivo)).toContain('1 falharam');
+  });
+
+  it('testar e perguntar a todas', async () => {
+    respostaIa = '{"decisao":"aprovar","confianca":0.7,"motivo":"conexão ok"}';
+    const [c] = await db.query<{ id: number }>('select id from conectores_ia');
+    expect((await painel('POST', `/ias/${c!.id}/testar`)).corpo).toMatchObject({ ok: true, parecer: { decisao: 'aprovar' } });
+    respostaIa = 'BTC está volátil.';
+    const r = await painel('POST', '/ias/perguntar', { pergunta: 'Como está o BTC?' });
+    expect(r.corpo).toMatchObject([{ ok: true, texto: 'BTC está volátil.' }]);
   });
 
   it('auditoria registrou as ações do painel', async () => {

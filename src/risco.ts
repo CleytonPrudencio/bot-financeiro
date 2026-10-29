@@ -101,3 +101,49 @@ export function avaliar(sinal: Sinal, e: EstadoRisco): Decisao {
       : e.posicao.quantidade;
   return { aprovado: true, modo, lado: 'venda', quantidade };
 }
+
+// ------------------------------------------------------------------ parecer das IAs
+//
+// Roda DEPOIS de `avaliar` aprovar. A IA só pode barrar: nunca cria ordem, nunca muda valor ou
+// lado, nunca passa por cima de limite. Se a estratégia exige IA e não há IA para consultar, a
+// ordem não sai (falha fechada).
+
+export interface PoliticaIa {
+  modo: 'desligado' | 'consultivo' | 'obrigatorio';
+  /** aprovações necessárias; null = todas as IAs consultadas */
+  quorum: number | null;
+  /** IA que falhou: "reprova" conta como não aprovou; "ignora" sai da conta */
+  falha: 'reprova' | 'ignora';
+  /** aprovação abaixo desta confiança não conta */
+  confiancaMin: number;
+  nasVendas: boolean;
+}
+
+export type VotoIa = { ok: true; decisao: 'aprovar' | 'vetar'; confianca: number } | { ok: false };
+
+/** Se este sinal passa pelas IAs. "zerar" nunca passa: sair de uma posição não depende de IA. */
+export function consultaIa(acao: Sinal['acao'], p: PoliticaIa): boolean {
+  if (p.modo === 'desligado') return false;
+  if (acao === 'comprar') return true;
+  return acao === 'vender' && p.nasVendas;
+}
+
+export function decidirComIa(votos: VotoIa[], p: PoliticaIa): { aprovado: boolean; motivo: string } {
+  const validos = votos.filter((v): v is Extract<VotoIa, { ok: true }> => v.ok);
+  const falhas = votos.length - validos.length;
+  const aprovacoes = validos.filter((v) => v.decisao === 'aprovar' && v.confianca >= p.confiancaMin).length;
+  const vetos = validos.filter((v) => v.decisao === 'vetar').length;
+  const placar = `${aprovacoes} aprovaram, ${vetos} vetaram${falhas ? `, ${falhas} falharam` : ''}`;
+
+  if (p.modo !== 'obrigatorio') return { aprovado: true, motivo: `IA consultiva (${placar})` };
+  if (votos.length === 0) return { aprovado: false, motivo: 'IA obrigatória, mas nenhum conector de IA ativo para consultar' };
+
+  const consideradas = p.falha === 'ignora' ? validos.length : votos.length;
+  if (consideradas === 0) return { aprovado: true, motivo: `nenhuma IA respondeu e a estratégia ignora falhas (${placar})` };
+  const precisa = Math.min(p.quorum ?? consideradas, consideradas);
+  if (aprovacoes >= precisa) return { aprovado: true, motivo: `IA aprovou: ${placar}; precisava de ${precisa}` };
+  return {
+    aprovado: false,
+    motivo: `IA barrou: ${placar}; precisava de ${precisa} aprovação(ões) com confiança ≥ ${Math.round(p.confiancaMin * 100)}%`,
+  };
+}
