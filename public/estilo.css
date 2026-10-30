@@ -812,6 +812,22 @@ body.na-entrada { overflow: hidden; }
 .escritorio-cartao { background: var(--painel); border: 1px solid var(--borda); border-left: 4px solid var(--primaria); border-radius: 12px; padding: 10px 12px; cursor: pointer; display: grid; gap: 4px; transition: border-color 0.2s, transform 0.2s var(--mola); }
 .escritorio-cartao:hover { transform: translateX(2px); }
 .escritorio-cartao.selecionado { box-shadow: 0 0 0 2px var(--alerta); }
+/* escritório ao vivo: quadro compacto, uma linha por robô */
+.quadro-robos { background: var(--painel); border: 1px solid var(--borda); border-radius: 12px; padding: 10px; display: grid; gap: 8px; }
+.quadro-robos-lista { display: grid; gap: 2px; }
+.escritorio button.linha-robo { all: unset; box-sizing: border-box; width: 100%; cursor: pointer; display: grid; text-align: left; grid-template-columns: 8px minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; font-size: 13px; }
+.escritorio button.linha-robo:hover, .escritorio button.linha-robo.aberta { background: color-mix(in srgb, var(--primaria) 10%, transparent); transform: none; filter: none; }
+.escritorio button.linha-robo:focus-visible { outline: 2px solid var(--primaria); }
+.linha-robo i { width: 8px; height: 8px; border-radius: 50%; background: var(--cor); }
+.linha-robo-nome { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.linha-robo-nome small { color: var(--suave); font-weight: 400; }
+.linha-robo-preco { font-size: 12px; color: var(--suave); }
+.linha-robo-var { font-size: 12px; min-width: 56px; text-align: right; }
+.selo-mini { font-size: 11px; padding: 2px 7px; border-radius: 999px; white-space: nowrap; background: color-mix(in srgb, var(--suave) 16%, transparent); color: var(--suave); }
+.selo-mini.ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.selo-mini.alerta { background: color-mix(in srgb, var(--alerta) 18%, transparent); color: var(--alerta); }
+.selo-mini.perigo { background: color-mix(in srgb, var(--perigo) 18%, transparent); color: var(--perigo); }
+.linha-robo-detalhe { display: grid; gap: 4px; padding: 4px 8px 10px 24px; }
 .escritorio-cartao-topo { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .escritorio-registro { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .escritorio-registro > li { background: var(--painel); border: 1px solid var(--borda); border-radius: 12px; padding: 10px 12px; display: grid; gap: 4px; animation: subir 0.4s var(--mola); }

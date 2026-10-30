@@ -10,7 +10,7 @@
 import { CATEGORIAS, criarMercadoFicticio, formatarPreco, ifr, aleatorio } from './mercado.js';
 import { analisar, aplicarConselho, decidirJuntos, executar, novaCarteira, verificarChefe, VALOR_POR_ORDEM } from './decisao.js';
 import * as D from './desenho.js';
-import { carteiraDa, criarMercadoReal, horaDoSinal, motivoDoRobo, propostaDoSinal, visualDa } from './aovivo.js';
+import { carteiraDa, criarMercadoReal, horaDoSinal, motivoDoRobo, propostaDoSinal, situacaoCurta, visualDa } from './aovivo.js';
 
 const INTERVALO_AO_VIVO_MS = 15_000;
 
@@ -811,12 +811,20 @@ export function montarEscritorio(raiz, opcoes = {}) {
     if (avisoAte && performance.now() > avisoAte) avisoEscala('');
   }
 
+  // ao vivo: um quadro compacto (uma linha por robô) no lugar dos cartões grandes
+  const contadorQuadro = h('span', { class: 'rotulo' });
+  const listaQuadro = h('div', { class: 'quadro-robos-lista' });
+  const quadroRobos = h('section', { class: 'quadro-robos' },
+    h('div', { class: 'escritorio-cartao-topo' }, h('strong', {}, 'Robôs'), contadorQuadro),
+    listaQuadro,
+    textoAviso);
+
   const lateral = h(
     'aside',
     { class: 'escritorio-lado' },
     h('div', { class: 'acoes' }, botaoPausa, ...botoesVel, botaoTela),
     aoVivo
-      ? h('p', { class: 'rotulo' }, 'Ao vivo: cada robô é uma estratégia sua, com o preço real da exchange. As ativas trabalham na mesa; as paradas descansam. Cada sinal que o bot recebe vira uma reunião com o chefe, e o carimbo mostra o que o bot decidiu de verdade. Esta tela só mostra: as ordens saem pelo bot.')
+      ? h('p', { class: 'rotulo' }, 'Cada robô é uma estratégia sua (ou uma moeda que o piloto está olhando), com o preço real. Toque numa linha para ver o motivo. Cada sinal vira uma reunião com o chefe.')
       : h('p', { class: 'rotulo' }, 'Dados fictícios: nenhuma ordem de verdade sai desta tela. Escolha quem trabalha hoje; quem fica de folga vai para a sala de descanso. Clique num robô para ver os detalhes.'),
     podeConselho && !aoVivo
       ? h('label', { class: 'interruptor escritorio-conselho-botao' },
@@ -824,8 +832,8 @@ export function montarEscritorio(raiz, opcoes = {}) {
           h('span', { class: 'interruptor-trilho' }, h('span', { class: 'interruptor-bola' })),
           h('span', { class: 'interruptor-texto' }, h('span', {}, 'Conselho de IAs na reunião'), h('small', { class: 'rotulo' }, 'consulta as IAs de verdade em cada proposta (gasta créditos); elas só podem vetar')))
       : null,
-    painelEscala,
-    h('div', { class: 'escritorio-cartoes' }, cartoes.map((c) => c.el)),
+    aoVivo ? quadroRobos : painelEscala,
+    aoVivo ? null : h('div', { class: 'escritorio-cartoes' }, cartoes.map((c) => c.el)),
     h('h2', {}, 'Decisões'),
     listaRegistro,
   );
@@ -849,7 +857,48 @@ export function montarEscritorio(raiz, opcoes = {}) {
     desenharCartoes();
   }
 
+  let ultimaAssinatura = '';
+  /** Ao vivo: o quadro de linhas, com quem tem posição e quem tem sinal primeiro. */
+  function desenharQuadro() {
+    const linhas = robos.map((r) => {
+      const e = r.ativo.estrategia;
+      const c = r.carteira;
+      const temPosicao = !r.ativo.olheiro && c.quantidade > 0;
+      const variacaoPosicao = temPosicao && c.precoEntrada && !r.ativo.semCotacao ? r.ativo.preco / c.precoEntrada - 1 : 0;
+      const motivo = motivoDoRobo(r.ativo);
+      const [texto, tipo] = ['indo', 'fila', 'reuniao'].includes(r.estado) ? ['com o chefe', 'alerta'] : situacaoCurta(motivo, { ativa: e.ativa, temPosicao, variacaoPosicao, olheiro: r.ativo.olheiro });
+      const peso = temPosicao ? 0 : tipo === 'ok' || tipo === 'alerta' ? 1 : e.ativa ? 2 : 3;
+      return { r, e, c, motivo, texto, tipo, peso, temPosicao };
+    });
+    linhas.sort((a, b) => a.peso - b.peso || a.r.ativo.simbolo.localeCompare(b.r.ativo.simbolo));
+    // só refaz a lista quando algo visível mudou (refazer a cada meio segundo engole toques)
+    const assinatura = JSON.stringify([selecionado?.id ?? null, ...linhas.map((l) => [l.r.id, l.texto, l.motivo, l.r.ativo.preco, l.r.ativo.variacaoDia])]);
+    if (assinatura === ultimaAssinatura) return;
+    ultimaAssinatura = assinatura;
+    contadorQuadro.textContent = `${robos.filter(naMesa).length}/${D.VAGAS_MESA.length} mesas · ${linhas.filter((l) => l.temPosicao).length} com posição`;
+    listaQuadro.replaceChildren(...linhas.map(({ r, e, c, motivo, texto, tipo, temPosicao }) => {
+      const nome = r.ativo.olheiro ? r.ativo.simbolo.split('/')[0] : e.nome.replace(/^Piloto /, '');
+      const v = r.ativo.variacaoDia * 100;
+      const linha = h('button', { class: `linha-robo ${r === selecionado ? 'aberta' : ''}`, type: 'button', onclick: () => selecionar(r), title: motivo ?? '' },
+        h('i', {}),
+        h('span', { class: 'linha-robo-nome' }, nome, r.ativo.olheiro ? h('small', {}, ' olheiro') : null),
+        h('span', { class: 'mono linha-robo-preco' }, r.ativo.semCotacao ? '—' : formatarPreco(r.ativo, r.ativo.preco)),
+        h('span', { class: `mono linha-robo-var ${v >= 0 ? 'ok' : 'perigo-txt'}` }, r.ativo.semCotacao ? '' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`),
+        h('span', { class: `selo-mini ${tipo}` }, texto));
+      linha.style.setProperty('--cor', r.cor);
+      if (r !== selecionado) return linha;
+      const detalhe = h('div', { class: 'linha-robo-detalhe' },
+        h('div', { class: 'rotulo' }, r.ativo.olheiro
+          ? `${r.ativo.simbolo}: o piloto de "${e.nome}" está de olho neste par`
+          : `${e.nome} · ${r.ativo.simbolo} · ${e.operando_real ? 'dinheiro REAL' : 'simulação'}${temPosicao ? ` · posição desde ${formatarPreco(r.ativo, c.precoEntrada)}` : ''}`),
+        h('div', { class: 'rotulo' }, e.auto_ligado ? `Piloto: ${motivo ?? 'aguardando a primeira passada'}` : 'Piloto desligado: só age com sinal do webhook ou pelos botões'),
+        h('div', { class: 'acoes' }, h('button', { class: 'pequeno secundario', type: 'button', onclick: () => (location.hash = '#/estrategias') }, 'Comprar ou vender em Estratégias')));
+      return h('div', { class: 'linha-robo-caixa' }, linha, detalhe);
+    }));
+  }
+
   function desenharCartoes() {
+    if (aoVivo) return desenharQuadro();
     for (const { r, el } of cartoes) {
       const c = r.carteira;
       const aberto = mercado.aberto(r.ativo);

@@ -230,3 +230,34 @@ export function propostaDoSinal(s, ativo) {
 export function horaDoSinal(s) {
   return new Date(s.recebido_em).toLocaleString('pt-BR', { timeZone: FUSO, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
+
+/**
+ * A situação do robô em duas ou três palavras, para o quadro do escritório: [texto, tipo], com tipo
+ * 'ok' | 'alerta' | 'perigo' | 'neutro'. `variacaoPosicao` é o resultado da posição aberta (fração).
+ */
+export function situacaoCurta(motivo, { ativa = true, temPosicao = false, variacaoPosicao = 0, olheiro = false } = {}) {
+  if (!ativa) return ['parada', 'neutro'];
+  if (temPosicao) {
+    const v = variacaoPosicao * 100;
+    return [`posição ${v >= 0 ? '+' : ''}${v.toFixed(2)}%`, v >= 0 ? 'ok' : 'perigo'];
+  }
+  const m = String(motivo ?? '').toLowerCase();
+  if (!m) return [olheiro ? 'de olho' : 'aguardando', 'neutro'];
+  const regras = [
+    [['aguardando a sua resposta'], 'aguardando você', 'alerta'],
+    [['falhou', 'erro'], 'erro', 'perigo'],
+    [['b3 fechada'], 'B3 fechada', 'neutro'],
+    [['consultou a ia'], 'limite de IA hoje', 'alerta'],
+    [['descansa', 'barrado'], 'descansando', 'neutro'],
+    [['→ executado'], 'comprou', 'ok'],
+    [['virada para alta', 'tendência de alta em curso'], 'sinal de alta', 'ok'],
+    [['tendência diária contra'], 'dia contra', 'alerta'],
+    [['abaixo da média de 200', 'média de 50 abaixo'], 'em queda', 'perigo'],
+    [['ifr esticado'], 'esticado', 'alerta'],
+    [['ifr fraco'], 'fraco', 'alerta'],
+    [['macd sem força', 'abaixo da média de 20'], 'sem força', 'alerta'],
+    [['não há saldo'], 'sem saldo', 'perigo'],
+  ];
+  for (const [chaves, texto, tipo] of regras) if (chaves.some((c) => m.includes(c))) return [texto, tipo];
+  return ['analisando', 'neutro'];
+}

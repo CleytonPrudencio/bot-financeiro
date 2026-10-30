@@ -219,3 +219,18 @@ describe('mesas do escritório', () => {
     Desenho.configurarMesas(8);
   });
 });
+
+// @ts-expect-error módulo JS do painel, sem tipos
+import { situacaoCurta } from '../public/escritorio/aovivo.js';
+
+describe('situação curta no quadro do escritório', () => {
+  it('resume o motivo do piloto em poucas palavras', () => {
+    expect(situacaoCurta('olhou 1 par em velas de 1m: nenhum está para alta agora. BTC/BRL: preço abaixo da média de 200 velas; MACD sem força')).toEqual(['em queda', 'perigo']);
+    expect(situacaoCurta('barrado ou stop há pouco: descansa 6 h')).toEqual(['descansando', 'neutro']);
+    expect(situacaoCurta('ETH/BRL: virou, mas tendência diária contra (preço abaixo da média de 50 dias)')).toEqual(['dia contra', 'alerta']);
+    expect(situacaoCurta('PEPE/BRL: tendência de alta em curso: preço acima… → executado')).toEqual(['comprou', 'ok']);
+    expect(situacaoCurta('qualquer coisa', { temPosicao: true, variacaoPosicao: 0.0123 })).toEqual(['posição +1.23%', 'ok']);
+    expect(situacaoCurta('x', { ativa: false })).toEqual(['parada', 'neutro']);
+    expect(situacaoCurta(null, { olheiro: true })).toEqual(['de olho', 'neutro']);
+  });
+});
