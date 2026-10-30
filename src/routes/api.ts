@@ -9,7 +9,7 @@ import { corretoraReal, ORIGEM_PAINEL, processarSinalDa, type Conta, type Estrat
 import { B3, cotacaoPublica, exchangesSuportadas, mercadosDa, MT5, paresDaMoeda, velasDiarias } from '../brokers/mercado.js';
 import { confirmarAlerta, recusarAlerta } from '../assistente/index.js';
 import { desligarTelegram, enviar as enviarTelegram, lerTelegram, salvarToken } from '../assistente/telegram.js';
-import { criarPilotoPadrao, POR_MOEDA } from '../piloto/index.js';
+import { criarPilotoPadrao, POR_MOEDA, POR_MOEDA_REPIQUE } from '../piloto/index.js';
 import { moedas } from '../brokers/tipos.js';
 import { iniciarAnalise } from '../analise/index.js';
 import { agentePronto, iniciarTeste, lerConfig, salvarConfig, type ConfigAgente } from '../agente/index.js';
@@ -386,6 +386,7 @@ const esquemaEstrategia = z
     auto_volume_min: z.number().min(0).default(500_000),
     auto_max_ia_dia: z.number().int().min(0).max(100).default(6),
     auto_exigir_virada: z.boolean().default(true),
+    auto_estilo: z.enum(['tendencia', 'repique']).default('tendencia'),
   });
 
 function conferirLimites(e: { valor_ordem: number; limite_por_ordem: number; limite_diario: number }): void {
@@ -435,15 +436,15 @@ api.post('/estrategias', async (req, res) => {
                               ia_modo, ia_conectores, ia_quorum, ia_falha, ia_confianca_min, ia_nas_vendas, ia_contexto,
                               analise_nota_min, analise_validade_h, ia_tipo,
                               auto_ligado, auto_stop_pct, auto_alvo_pct, auto_protecao_pct, auto_recuo_pct,
-                              auto_varrer, auto_tempo, auto_intervalo_min, auto_volume_min, auto_max_ia_dia, auto_exigir_virada)
+                              auto_varrer, auto_tempo, auto_intervalo_min, auto_volume_min, auto_max_ia_dia, auto_exigir_virada, auto_estilo)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
-             $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35) returning id`,
+             $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36) returning id`,
     [d.nome, d.conta_id, d.simbolo, d.ativa, d.real, t.hash, t.prefixo, d.valor_ordem, d.limite_por_ordem,
       d.limite_diario, d.limite_posicao, d.intervalo_min_seg, d.desvio_max_pct, d.ips_permitidos || null,
       d.ia_modo, d.ia_conectores, d.ia_quorum, d.ia_falha, d.ia_confianca_min, d.ia_nas_vendas, d.ia_contexto || null,
       d.analise_nota_min, d.analise_validade_h, d.ia_tipo,
       d.auto_ligado, d.auto_stop_pct, d.auto_alvo_pct, d.auto_protecao_pct, d.auto_recuo_pct,
-      d.auto_varrer, d.auto_tempo, d.auto_intervalo_min, d.auto_volume_min, d.auto_max_ia_dia, d.auto_exigir_virada],
+      d.auto_varrer, d.auto_tempo, d.auto_intervalo_min, d.auto_volume_min, d.auto_max_ia_dia, d.auto_exigir_virada, d.auto_estilo],
   );
   await evento(req.usuarioId, 'estrategia_criada', { estrategia: r[0]!.id, real: d.real });
   // o token só aparece agora; no banco fica só o hash
@@ -471,7 +472,7 @@ api.patch('/estrategias/:id', async (req, res) => {
             ia_nas_vendas = $18, ia_contexto = $19, analise_nota_min = $20, analise_validade_h = $21, ia_tipo = $22,
             auto_ligado = $23, auto_stop_pct = $24, auto_alvo_pct = $25, auto_protecao_pct = $26, auto_recuo_pct = $27,
             auto_varrer = $28, auto_tempo = $29, auto_intervalo_min = $30, auto_volume_min = $31, auto_max_ia_dia = $32,
-            auto_exigir_virada = $33
+            auto_exigir_virada = $33, auto_estilo = $34
       where id = $1`,
     [estId, novo.nome, novo.simbolo, novo.ativa, novo.real, novo.valor_ordem, novo.limite_por_ordem, novo.limite_diario,
       novo.limite_posicao, novo.intervalo_min_seg, novo.desvio_max_pct, novo.ips_permitidos || null,
@@ -479,7 +480,7 @@ api.patch('/estrategias/:id', async (req, res) => {
       novo.ia_contexto || null, novo.analise_nota_min, novo.analise_validade_h, novo.ia_tipo,
       novo.auto_ligado, novo.auto_stop_pct, novo.auto_alvo_pct, novo.auto_protecao_pct, novo.auto_recuo_pct,
       novo.auto_varrer, novo.auto_tempo, novo.auto_intervalo_min, novo.auto_volume_min, novo.auto_max_ia_dia,
-      novo.auto_exigir_virada],
+      novo.auto_exigir_virada, novo.auto_estilo],
   );
   await evento(req.usuarioId, 'estrategia_alterada', { estrategia: estId, mudou: d });
   res.json({ ok: true });
@@ -560,7 +561,7 @@ api.post('/estrategias/:id/ordem', async (req, res) => {
  * estratégia (ex.: todos os pares em BRL da Binance). Saem em SIMULAÇÃO: operar real é um passo do dono.
  */
 api.post('/estrategias/todas-as-moedas', async (req, res) => {
-  const d = validar(z.object({ conta_id: z.number().int().positive(), moeda: z.string().trim().toUpperCase().min(2).max(10).default('BRL') }), req.body);
+  const d = validar(z.object({ conta_id: z.number().int().positive(), moeda: z.string().trim().toUpperCase().min(2).max(10).default('BRL'), estilo: z.enum(['tendencia', 'repique']).default('repique') }), req.body);
   const conta = await umOuNada<Conta>('select * from contas where id = $1', [d.conta_id]);
   if (!conta) throw new ErroPedido('conta não existe');
   const pares = await paresDaMoeda(conta.exchange, d.moeda, 500_000).catch((e: Error) => {
@@ -570,7 +571,8 @@ api.post('/estrategias/todas-as-moedas', async (req, res) => {
   const criadas: string[] = [];
   for (const p of pares.slice(0, 30)) {
     if (existentes.has(p.simbolo)) continue;
-    await criarPilotoPadrao(conta.id, `Piloto ${p.simbolo.split('/')[0]}`, p.simbolo, conta.exchange === B3 ? { ...POR_MOEDA, tempo: '1d', intervaloMin: 10 } : POR_MOEDA);
+    const base = d.estilo === 'repique' ? POR_MOEDA_REPIQUE : POR_MOEDA;
+    await criarPilotoPadrao(conta.id, `Piloto ${p.simbolo.split('/')[0]}`, p.simbolo, conta.exchange === B3 ? { ...base, tempo: '1d', intervaloMin: 10 } : base);
     criadas.push(p.simbolo);
   }
   await evento(req.usuarioId, 'estrategias_por_moeda', { conta: conta.id, criadas });

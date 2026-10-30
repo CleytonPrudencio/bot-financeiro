@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Vela } from '../src/analise/indicadores.js';
-import { avaliarEntrada, b3Aberta, DIA_MS, faltas, ler, tendenciaQuebrou, velasFechadas } from '../src/piloto/regras.js';
+import { avaliarEntrada, avaliarRepique, b3Aberta, DIA_MS, faltas, ler, tendenciaQuebrou, velasFechadas } from '../src/piloto/regras.js';
 
 const T0 = Date.UTC(2026, 0, 1);
 const velas = (fechamentos: number[]): Vela[] =>
@@ -88,5 +88,24 @@ describe('pregão da B3', () => {
     expect(b3Aberta(Date.UTC(2026, 9, 29, 19, 54))).toBe(true); // 16h54
     expect(b3Aberta(Date.UTC(2026, 9, 29, 19, 55))).toBe(false); // 16h55: leilão de fechamento
     expect(b3Aberta(Date.UTC(2026, 9, 31, 15, 0))).toBe(false); // sábado
+  });
+});
+
+describe('estilo repique', () => {
+  // 80 velas de lado, 15 de queda (IFR afunda) e uma vela de volta
+  const lado = Array.from({ length: 80 }, () => 100);
+  const queda = Array.from({ length: 15 }, (_, i) => 100 - (i + 1) * 0.3);
+  const velasDe = (f: number[]) => f.map((x, i) => ({ t: T0 + i * 60_000, abre: i ? f[i - 1]! : x, max: Math.max(x, i ? f[i - 1]! : x), min: Math.min(x, i ? f[i - 1]! : x), fecha: x, volume: 1 }));
+
+  it('compra quando o vendido demais começa a voltar', () => {
+    const ultimo = queda[queda.length - 1]!;
+    expect(avaliarRepique(velasDe([...lado, ...queda])).motivo).toContain('esperando a vela de volta');
+    expect(avaliarRepique(velasDe([...lado, ...queda, ultimo + 0.4]))).toMatchObject({ comprar: true, motivo: expect.stringContaining('repique') });
+  });
+
+  it('não compra sem estar vendido demais, nem em queda descontrolada', () => {
+    expect(avaliarRepique(velasDe([...lado, 100.5])).motivo).toContain('não está vendido demais');
+    const tombo = Array.from({ length: 15 }, (_, i) => 100 - (i + 1) * 0.6); // ~9% de queda
+    expect(avaliarRepique(velasDe([...lado, ...tombo, tombo[14]! + 0.3])).motivo).toContain('queda forte demais');
   });
 });

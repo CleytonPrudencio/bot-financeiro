@@ -631,7 +631,9 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     expect(r.corpo).toMatchObject({ criadas: ['BTC/BRL', 'ETH/BRL'] });
     expect((await painel('POST', '/estrategias/todas-as-moedas', { conta_id: conta.corpo.id })).corpo).toMatchObject({ criadas: [] });
     const [btc] = await db.query<Record<string, unknown>>('select * from estrategias where conta_id = $1 and simbolo = $2', [conta.corpo.id, 'BTC/BRL']);
-    expect(btc).toMatchObject({ nome: 'Piloto BTC', real: false, valor_ordem: 15, ia_modo: 'obrigatorio', auto_varrer: false, auto_tempo: '1m', auto_max_ia_dia: 2, auto_stop_pct: 1.5 });
+    // padrão: estilo repique (alvo e stop curtos, e o agente sabe que comprar na queda é o plano)
+    expect(btc).toMatchObject({ nome: 'Piloto BTC', real: false, valor_ordem: 15, ia_modo: 'obrigatorio', auto_varrer: false, auto_tempo: '1m', auto_max_ia_dia: 2, auto_estilo: 'repique', auto_stop_pct: 1, auto_alvo_pct: 1.5 });
+    expect(String(btc!.ia_contexto)).toContain('REPIQUE');
 
     // IA obrigatória, mas a ordem é do dono: sai sem consultar a IA, dentro dos limites
     const pedidos = pedidosIa.length;

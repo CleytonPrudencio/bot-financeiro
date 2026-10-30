@@ -195,6 +195,13 @@ regras de risco, a trava por estratégia, o agente de IA nas compras e as três 
   15 min; agente em etapas obrigatório; em **simulação** (com R$ 50 de saldo simulado). Operar real
   é decisão do dono.
 
+**Estilo repique** (`auto_estilo = 'repique'`, `avaliarRepique` em `src/piloto/regras.ts`): o contrário
+da tendência. Compra a moeda que caiu demais quando ela começa a voltar: IFR da vela anterior abaixo
+de 30, a última vela fechando em alta com o IFR subindo, e no máximo 6% abaixo da máxima das
+últimas 60 velas (queda descontrolada fica de fora). Sem filtro da tendência do dia nem saída por
+tendência; alvo e stop curtos (padrão +1,5% e -1%). O agente recebe o contexto de que comprar na
+queda é o plano. As estratégias "uma por moeda" nascem em repique (migração 012 passou as existentes).
+
 **Botões Comprar e Vender tudo** em cada estratégia: ordem do dono pelo painel (`POST
 /api/estrategias/:id/ordem`, origem `painel`). Passa pelas regras de risco, pelos limites e pelas três
 chaves; só não passa pela IA (`consultaIa(..., doDono)`), porque a decisão é dele.

@@ -110,3 +110,32 @@ export function b3Aberta(agora: number): boolean {
   const minutos = Number(p.hour) * 60 + Number(p.minute);
   return minutos >= 10 * 60 && minutos < 16 * 60 + 55;
 }
+
+// ------------------------------------------------------------------ estilo "repique"
+//
+// O contrário do estilo tendência: compra a moeda que caiu demais, quando ela começa a voltar, para
+// um ganho curto (o alvo e o stop curtos ficam na estratégia). Entra quando:
+//   - o IFR da vela anterior estava abaixo de 30 (vendido demais);
+//   - a última vela fechou em alta (fechamento acima da abertura e do fechamento anterior) e o IFR subiu;
+//   - não é queda descontrolada: no máximo 6% abaixo da máxima das últimas 60 velas.
+
+export const REPIQUE_IFR_MAX = 30;
+export const REPIQUE_QUEDA_MAX_PCT = 6;
+
+export function avaliarRepique(fechadas: Vela[]): Entrada {
+  if (fechadas.length < 61) return { comprar: false, motivo: `poucas velas para o repique (${fechadas.length})` };
+  const fechamentos = fechadas.map((v) => v.fecha);
+  const ultima = fechadas[fechadas.length - 1]!;
+  const anterior = fechadas[fechadas.length - 2]!;
+  const ifrAgora = ifr(fechamentos);
+  const ifrAntes = ifr(fechamentos.slice(0, -1));
+  if (ifrAgora === null || ifrAntes === null) return { comprar: false, motivo: 'indicadores indisponíveis' };
+  if (ifrAntes >= REPIQUE_IFR_MAX) return { comprar: false, motivo: `sem repique: não está vendido demais (IFR ${ifrAntes.toFixed(0)})` };
+  const maxima = Math.max(...fechadas.slice(-60).map((v) => v.max));
+  const queda = (1 - ultima.fecha / maxima) * 100;
+  if (queda > REPIQUE_QUEDA_MAX_PCT) return { comprar: false, motivo: `sem repique: queda forte demais (${queda.toFixed(1)}% da máxima recente)` };
+  if (!(ultima.fecha > ultima.abre && ultima.fecha > anterior.fecha && ifrAgora > ifrAntes)) {
+    return { comprar: false, motivo: `vendido demais (IFR ${ifrAntes.toFixed(0)}), esperando a vela de volta` };
+  }
+  return { comprar: true, motivo: `repique: IFR saiu de ${ifrAntes.toFixed(0)} (vendido demais) e a vela fechou em alta` };
+}

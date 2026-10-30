@@ -9,7 +9,7 @@ import { moedas } from '../brokers/tipos.js';
 import { corretoraReal, processarSinalDa, type Conta, type Estrategia, type Resultado } from '../motor.js';
 import { kronosLigado, preverKronos } from '../previsao/kronos.js';
 import { conferirSaida, deveAvisarStop, stopSugerido } from '../risco.js';
-import { avaliarEntrada, b3Aberta, DIA_MS, filtroDiario, KRONOS_MIN_ALTA, tendenciaQuebrou, velasFechadas } from './regras.js';
+import { avaliarEntrada, avaliarRepique, b3Aberta, DIA_MS, filtroDiario, KRONOS_MIN_ALTA, tendenciaQuebrou, velasFechadas } from './regras.js';
 
 // Piloto automático: o bot gera os próprios sinais das estratégias com "piloto ligado" e manda pelo
 // mesmo caminho do webhook (processarSinalDa). Então vale tudo: regras de risco, trava por
@@ -188,12 +188,14 @@ async function cuidar(e: EstrategiaPiloto, agora: number): Promise<void> {
     const fechadas = velasFechadas(await velas(e.exchange, simbolo, tempo, 260), agora, duracao);
     const vela = fechadas[fechadas.length - 1]?.t ?? 0;
     const fechamento = fechadas[fechadas.length - 1]?.fecha;
-    const entrada = avaliarEntrada(fechadas, { exigirVirada: e.auto_exigir_virada });
+    const repique = e.auto_estilo === 'repique';
+    const entrada = repique ? avaliarRepique(fechadas) : avaliarEntrada(fechadas, { exigirVirada: e.auto_exigir_virada });
     if (!entrada.comprar) {
       anotar(simbolo, entrada.motivo.replace(/^sem entrada: /, ''), false, fechamento);
       continue;
     }
-    if (tempo !== '1d') {
+    // o repique compra justamente na queda: o filtro da tendência do dia não vale para ele
+    if (tempo !== '1d' && !repique) {
       const contra = filtroDiario(velasFechadas(await diariasComCache(e.exchange, simbolo), agora));
       if (contra) {
         anotar(simbolo, `virou, mas ${contra}`, false, fechamento);
@@ -277,7 +279,7 @@ async function cuidarDaPosicao(e: EstrategiaPiloto, agora: number): Promise<void
   const texto = `${e.simbolo}: posição aberta, ${pct((preco / precoMedio - 1) * 100)} desde a compra; stop em ${(precoMedio * (1 - e.auto_stop_pct / 100)).toPrecision(6)}`;
 
   const ultimaDiaria = Math.floor(agora / DIA_MS) * DIA_MS - DIA_MS;
-  if ((tendenciaConferida.get(e.id) ?? 0) < ultimaDiaria) {
+  if (e.auto_estilo !== 'repique' && (tendenciaConferida.get(e.id) ?? 0) < ultimaDiaria) {
     tendenciaConferida.set(e.id, ultimaDiaria);
     const quebra = tendenciaQuebrou(velasFechadas(await diariasComCache(e.exchange, e.simbolo), agora));
     if (quebra) {
@@ -363,6 +365,8 @@ export interface OpcoesPiloto {
   intervaloMin?: number;
   /** varre todos os pares da moeda (padrão) ou fica só no par dado */
   varrer?: boolean;
+  estilo?: 'tendencia' | 'repique';
+  contexto?: string;
   valor?: number;
   maxIaDia?: number;
   stop?: number;
@@ -383,13 +387,13 @@ export async function criarPilotoPadrao(contaId: number, nome: string, simbolo: 
                               limite_diario, limite_posicao, intervalo_min_seg, desvio_max_pct,
                               ia_modo, ia_tipo, ia_falha, ia_confianca_min, ia_nas_vendas, ia_contexto,
                               auto_ligado, auto_stop_pct, auto_alvo_pct, auto_protecao_pct, auto_recuo_pct,
-                              auto_varrer, auto_tempo, auto_intervalo_min, auto_exigir_virada, auto_max_ia_dia)
+                              auto_varrer, auto_tempo, auto_intervalo_min, auto_exigir_virada, auto_max_ia_dia, auto_estilo)
      values ($1, $2, $3, true, false, $4, $5, $6, $6, $6, $6, $7, $8,
              'obrigatorio', 'agente', 'reprova', 0.6, false, $9,
-             true, $10, $11, $12, $13, $16, $14, $15, false, $17) returning id`,
+             true, $10, $11, $12, $13, $16, $14, $15, false, $17, $18) returning id`,
     [nome, contaId, simbolo, t.hash, t.prefixo, valor, PADRAO.intervalo_min_seg, PADRAO.desvio_max_pct,
-      PADRAO.ia_contexto, opcoes.stop ?? PADRAO.stop, opcoes.alvo ?? PADRAO.alvo, opcoes.protecao ?? PADRAO.protecao, opcoes.recuo ?? PADRAO.recuo,
-      opcoes.tempo ?? PADRAO.tempo, opcoes.intervaloMin ?? PADRAO.intervalo_min, opcoes.varrer ?? true, opcoes.maxIaDia ?? 6],
+      opcoes.contexto ?? PADRAO.ia_contexto, opcoes.stop ?? PADRAO.stop, opcoes.alvo ?? PADRAO.alvo, opcoes.protecao ?? PADRAO.protecao, opcoes.recuo ?? PADRAO.recuo,
+      opcoes.tempo ?? PADRAO.tempo, opcoes.intervaloMin ?? PADRAO.intervalo_min, opcoes.varrer ?? true, opcoes.maxIaDia ?? 6, opcoes.estilo ?? 'tendencia'],
   );
   await query(
     `insert into saldos_simulados (conta_id, moeda, quantidade) values ($1, 'BRL', $2) on conflict (conta_id, moeda) do nothing`,
@@ -400,6 +404,18 @@ export async function criarPilotoPadrao(contaId: number, nome: string, simbolo: 
 
 /** Valores das estratégias "uma por moeda": velas de 1 min, stop curto, pouca IA por moeda (custo). */
 export const POR_MOEDA: OpcoesPiloto = { tempo: '1m', intervaloMin: 1, varrer: false, valor: 15, maxIaDia: 2, stop: 1.5, alvo: 3, protecao: 1.2, recuo: 0.6 };
+
+/** O mesmo, no estilo repique: alvo e stop curtos e o agente sabendo que comprar na queda é o plano. */
+export const POR_MOEDA_REPIQUE: OpcoesPiloto = {
+  ...POR_MOEDA,
+  estilo: 'repique',
+  stop: 1,
+  alvo: 1.5,
+  protecao: 0.8,
+  recuo: 0.4,
+  contexto:
+    'Estratégia de REPIQUE: compra a moeda que caiu demais (IFR abaixo de 30) quando a vela volta a fechar em alta, para um ganho curto (alvo +1,5%, stop -1%). A tendência de baixa no dia é esperada nesta estratégia e não é motivo para vetar sozinha. Vete se houver notícia grave, queda descontrolada ou risco claro de continuar caindo forte.',
+};
 
 export async function garantirEstrategiaPadrao(): Promise<number | null> {
   const feita = await umOuNada('select 1 from configuracoes where chave = $1', ['estrategia_padrao']);

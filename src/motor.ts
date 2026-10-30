@@ -71,6 +71,7 @@ export interface Estrategia {
   auto_max_ia_dia: number;
   auto_varrido_em: Date | null;
   auto_exigir_virada: boolean;
+  auto_estilo: 'tendencia' | 'repique';
 }
 
 /** "IP" das ordens que o dono manda pelo painel (botões Comprar e Vender da estratégia). */

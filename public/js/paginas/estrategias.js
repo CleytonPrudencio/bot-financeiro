@@ -65,6 +65,7 @@ function formEstrategia({ e = {}, contas, ias, aoSalvar }) {
       h('legend', {}, icone('robo'), 'Piloto automático'),
       h('p', { class: 'suave' }, 'O próprio bot gera os sinais, sem TradingView. Compra só quando a tendência diária vira para alta (e o Kronos e as IAs deixam); sai sozinho no stop de perda, no alvo, na proteção do ganho ou quando a tendência quebra. Sair nunca passa pela IA.'),
       interruptor('Ligar o piloto automático', { name: 'auto_ligado', checked: e.auto_ligado }, 'Os sinais do piloto passam pelas mesmas regras e limites do webhook'),
+      escolha('Estilo', 'auto_estilo', [['tendencia', 'Tendência (compra a favor da alta)'], ['repique', 'Repique (compra a queda que começa a voltar)']], e.auto_estilo ?? 'tendencia', 'repique: alvo e stop curtos combinam (ex.: +1,5% e -1%)'),
       interruptor('Só comprar na virada da tendência', { name: 'auto_exigir_virada', checked: e.auto_exigir_virada ?? true }, 'Desligado: também entra numa alta já em curso (mais compras, e mais risco de comprar perto do topo); par barrado ou que bateu no stop descansa 6 h'),
       interruptor('Procurar em todos os pares da moeda', { name: 'auto_varrer', checked: e.auto_varrer }, 'Ex.: todos os pares em BRL da Binance com volume; opera o melhor, um de cada vez (o par da estratégia troca sozinho, só sem posição)'),
       h('div', { class: 'campos' },
@@ -127,7 +128,7 @@ function cartaoEstrategia(e, { resumo, ias, recarregar }) {
       selo(MODOS_IA[e.ia_modo] ?? 'IA desligada', e.ia_modo === 'desligado' ? 'neutro' : 'ia', 'ias'),
       e.ia_modo !== 'desligado' && e.ia_tipo === 'agente' ? selo('agente em etapas', 'ia', 'robo') : null,
       e.analise_nota_min !== null && e.analise_nota_min !== undefined ? selo(`nota ≥ ${e.analise_nota_min}`, 'ia', 'analise') : null,
-      e.auto_ligado ? selo(`piloto${e.auto_varrer ? ' · todos os pares' : ''} · ${e.auto_tempo} · stop ${Number(e.auto_stop_pct).toLocaleString('pt-BR')}%`, 'ok', 'robo') : null,
+      e.auto_ligado ? selo(`piloto${e.auto_estilo === 'repique' ? ' repique' : ''}${e.auto_varrer ? ' · todos os pares' : ''} · ${e.auto_tempo} · stop ${Number(e.auto_stop_pct).toLocaleString('pt-BR')}%`, 'ok', 'robo') : null,
     ),
     e.auto_ligado ? h('p', { class: 'pequeno-texto suave piloto-situacao' }, e.auto_situacao ? `Piloto: ${e.auto_situacao}` : 'Piloto: aguardando a primeira passada') : null,
     h('div', { class: 'numeros' },
@@ -219,7 +220,7 @@ function todasAsMoedas(contas, recarregar) {
     onsubmit: async (ev) => {
       ev.preventDefault();
       const d = lerForm(form);
-      const r = await tentar(() => api('POST', '/estrategias/todas-as-moedas', { conta_id: Number(d.conta_id), moeda: d.moeda }));
+      const r = await tentar(() => api('POST', '/estrategias/todas-as-moedas', { conta_id: Number(d.conta_id), moeda: d.moeda, estilo: d.estilo }));
       if (r) {
         dlg.fechar();
         avisar(r.criadas.length ? `Criei ${r.criadas.length} estratégias: ${r.criadas.join(', ')}` : 'Todas as moedas já tinham estratégia', 'ok');
@@ -227,10 +228,11 @@ function todasAsMoedas(contas, recarregar) {
       }
     },
   },
-  h('p', { class: 'suave' }, 'Cria uma estratégia de piloto para cada par da moeda com volume (ex.: tudo em BRL), com posição própria: velas de 1 min, R$ 15 por ordem, stop de 1,5% e no máximo 2 consultas à IA por moeda por dia. Todas nascem em simulação.'),
+  h('p', { class: 'suave' }, 'Cria uma estratégia de piloto para cada par da moeda com volume (ex.: tudo em BRL), com posição própria: velas de 1 min, R$ 15 por ordem e no máximo 2 consultas à IA por moeda por dia. Repique: alvo +1,5% e stop -1%; tendência: alvo +3% e stop -1,5%. Todas nascem em simulação.'),
   h('div', { class: 'campos' },
     escolha('Conta', 'conta_id', contas.map((c) => [c.id, `${c.nome} (${c.exchange})`]), contas[0]?.id),
-    campo('Moeda de cotação', { name: 'moeda', value: 'BRL', required: true })),
+    campo('Moeda de cotação', { name: 'moeda', value: 'BRL', required: true }),
+    escolha('Estilo', 'estilo', [['repique', 'Repique (compra a queda que começa a voltar)'], ['tendencia', 'Tendência (compra a favor da alta)']], 'repique')),
   h('div', { class: 'acoes acoes-fim' }, botao('Criar', { nomeIcone: 'mais', type: 'submit' })));
   const dlg = janela('Uma estratégia por moeda', { icone: 'estrategias' }, form);
 }

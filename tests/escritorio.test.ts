@@ -232,5 +232,7 @@ describe('situação curta no quadro do escritório', () => {
     expect(situacaoCurta('qualquer coisa', { temPosicao: true, variacaoPosicao: 0.0123 })).toEqual(['posição +1.23%', 'ok']);
     expect(situacaoCurta('x', { ativa: false })).toEqual(['parada', 'neutro']);
     expect(situacaoCurta(null, { olheiro: true })).toEqual(['de olho', 'neutro']);
+    expect(situacaoCurta('BTC/BRL: vendido demais (IFR 24), esperando a vela de volta')).toEqual(['vendido, esperando', 'alerta']);
+    expect(situacaoCurta('BTC/BRL: repique: IFR saiu de 24 (vendido demais) e a vela fechou em alta; Kronos 61% de alta')).toEqual(['sinal de repique', 'ok']);
   });
 });
