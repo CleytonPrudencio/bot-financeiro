@@ -2,26 +2,40 @@
 // escala do canvas. Nenhuma função aqui muda estado do jogo, só desenha.
 
 export const LARGURA = 1280;
-export const ALTURA = 720;
+/** Altura lógica: 720 com 2 fileiras de mesas; cresce 185 por fileira a mais (ver configurarMesas). */
+export let ALTURA = 720;
+const ALTURA_BASE = 720;
 export const CHAO_Y = 230; // onde a parede encontra o chão
 
 const SALA = { esq: 470, dir: 810, fundo: CHAO_Y, frente: 305, portaEsq: 598, portaDir: 682 };
 export { SALA };
 
 /**
- * As 8 mesas do escritório (duas fileiras, dos dois lados do corredor). `lado` é onde o robô fica
- * em relação à mesa: o monitor vai do outro lado. Quem está escalado ocupa uma mesa livre.
+ * As mesas do escritório: fileiras de 4 (duas de cada lado do corredor), a partir de 2 fileiras.
+ * `lado` é onde o robô fica em relação à mesa: o monitor vai do outro lado. Quem está escalado ocupa
+ * uma mesa livre. O array é o mesmo sempre (quem importou continua vendo); configurarMesas o refaz.
  */
-export const VAGAS_MESA = [
-  { x: 155, y: 480, lado: -1 },
-  { x: 400, y: 480, lado: 1 },
-  { x: 880, y: 480, lado: -1 },
-  { x: 1125, y: 480, lado: 1 },
-  { x: 165, y: 665, lado: -1 },
-  { x: 400, y: 665, lado: 1 },
-  { x: 880, y: 665, lado: -1 },
-  { x: 1115, y: 665, lado: 1 },
+export const VAGAS_MESA = [];
+const COLUNAS = [
+  { x: 160, lado: -1 },
+  { x: 400, lado: 1 },
+  { x: 880, lado: -1 },
+  { x: 1120, lado: 1 },
 ];
+const PRIMEIRA_FILEIRA_Y = 480;
+const ENTRE_FILEIRAS = 185;
+
+/** Mesas para `quantos` robôs (no mínimo 8): mais fileiras para baixo, e o escritório fica mais alto. */
+export function configurarMesas(quantos = 8) {
+  const fileiras = Math.max(2, Math.ceil(quantos / COLUNAS.length));
+  VAGAS_MESA.length = 0;
+  for (let f = 0; f < fileiras; f++) {
+    for (const c of COLUNAS) VAGAS_MESA.push({ x: c.x, y: PRIMEIRA_FILEIRA_Y + f * ENTRE_FILEIRAS, lado: c.lado });
+  }
+  ALTURA = PRIMEIRA_FILEIRA_Y + (fileiras - 1) * ENTRE_FILEIRAS + 55;
+  return VAGAS_MESA.length;
+}
+configurarMesas(8);
 
 /** Faixa do chão entre a sala de descanso e as mesas: por onde se anda para descansar. */
 export const FAIXA_DESCANSO_Y = 352;
@@ -48,8 +62,8 @@ export const VAGAS_DESCANSO = [
 /** Robôs um pouco maiores que o resto do cenário, para ler bem as expressões. */
 export const TAMANHO_ROBO = 1.32;
 
-/** Escala de perspectiva: mais perto da câmera (y maior), maior. */
-export const escalaEm = (y) => 0.62 + 0.5 * ((y - CHAO_Y) / (ALTURA - CHAO_Y));
+/** Escala de perspectiva: mais perto da câmera (y maior), maior; nas fileiras extras, para de crescer. */
+export const escalaEm = (y) => Math.min(1.12, 0.62 + 0.5 * ((y - CHAO_Y) / (ALTURA_BASE - CHAO_Y)));
 
 const misturar = (a, b, t) => {
   const pa = a.match(/\w\w/g).map((h) => parseInt(h, 16));

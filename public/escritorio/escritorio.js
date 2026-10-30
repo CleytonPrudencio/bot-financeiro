@@ -93,6 +93,8 @@ export function montarEscritorio(raiz, opcoes = {}) {
   const reduzido = opcoes.reduzido ?? window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
   const aoVivo = opcoes.aoVivo ?? null;
   const mercado = aoVivo ? criarMercadoReal(aoVivo.dados) : criarMercadoFicticio(opcoes.semente ?? Date.now());
+  // ao vivo, uma mesa para cada robô que trabalha (as fileiras crescem de 4 em 4)
+  D.configurarMesas(aoVivo ? mercado.ativos.filter((a) => a.estrategia.ativa).length : 8);
   if (aoVivo?.agora) mercado.usarRelogio(aoVivo.agora);
   let ultimoSinal = 0;
   let buscaId = 0;

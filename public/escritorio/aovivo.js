@@ -101,7 +101,11 @@ export function criarMercadoReal(dados) {
   const ativos = [];
   for (const e of dados.estrategias) {
     ativos.push(montarAtivo(e, ativos.length));
-    for (const par of e.pares ?? []) ativos.push(montarAtivo(e, ativos.length, par));
+    for (const par of e.pares ?? []) {
+      // a moeda que já tem estratégia própria aparece pelo robô dela: sem olheiro repetido
+      if (dados.estrategias.some((x) => x.id !== e.id && x.simbolo === par.simbolo && x.exchange === e.exchange)) continue;
+      ativos.push(montarAtivo(e, ativos.length, par));
+    }
   }
   const relogio = { minutos: 0, dia: 1 };
   let agora = () => Date.now();

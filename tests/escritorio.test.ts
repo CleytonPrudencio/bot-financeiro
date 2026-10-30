@@ -203,3 +203,19 @@ describe('escritório ao vivo: olheiros da varredura', () => {
     expect(m.ativos[1].simbolo).toBe('ETH/BRL');
   });
 });
+
+// @ts-expect-error módulo JS do painel, sem tipos
+import * as Desenho from '../public/escritorio/desenho.js';
+
+describe('mesas do escritório', () => {
+  it('8 mesas no mínimo; mais robôs, mais fileiras de 4 e o escritório fica mais alto', () => {
+    expect(Desenho.configurarMesas(3)).toBe(8);
+    expect(Desenho.ALTURA).toBe(720);
+    expect(Desenho.configurarMesas(13)).toBe(16);
+    expect(Desenho.VAGAS_MESA.at(-1)).toMatchObject({ y: 480 + 3 * 185 });
+    expect(Desenho.ALTURA).toBe(480 + 3 * 185 + 55);
+    // a perspectiva para de crescer nas fileiras extras
+    expect(Desenho.escalaEm(1000)).toBe(1.12);
+    Desenho.configurarMesas(8);
+  });
+});
