@@ -10,6 +10,7 @@ import { paginaIas } from './js/paginas/ias.js';
 import { paginaAnalises } from './js/paginas/analises.js';
 import { paginaAgente } from './js/paginas/agente.js';
 import { paginaAssistente } from './js/paginas/assistente.js';
+import { paginaBinarias } from './js/paginas/binarias.js';
 import { paginaAuditoria, paginaOrdens, paginaSinais } from './js/paginas/historico.js';
 
 const conteudo = $('#conteudo');
@@ -66,7 +67,8 @@ const ROTAS = [
   { grupo: 'Operação' },
   { hash: '#/estrategias', nome: 'Estratégias', icone: 'estrategias', pagina: paginaEstrategias },
   { hash: '#/contas', nome: 'Contas', icone: 'contas', pagina: paginaContas },
-  { hash: '#/assistente', nome: 'Assistente XP', icone: 'enviar', pagina: paginaAssistente, novo: true },
+  { hash: '#/assistente', nome: 'Assistente XP', icone: 'enviar', pagina: paginaAssistente },
+  { hash: '#/binarias', nome: 'Binárias', icone: 'relogio', pagina: paginaBinarias, novo: true },
   { hash: '#/ias', nome: 'IAs', icone: 'ias', pagina: paginaIas },
   { hash: '#/agente', nome: 'Agente', icone: 'robo', pagina: paginaAgente },
   { hash: '#/analises', nome: 'Análises', icone: 'analise', pagina: paginaAnalises },

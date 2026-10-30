@@ -268,6 +268,47 @@ sequenceDiagram
 - **Pregão**: o piloto só olha a B3 em dias úteis, das 10h às 16h55 de Brasília.
 - Cotações e velas ficam em `mt5_mercado`; a análise usa o BOVA11 como referência de força relativa.
 
+## Opções binárias (Quotex, ponte no computador do dono)
+
+A pedido do dono e **por conta e risco dele**. A Quotex não tem API oficial: a ponte
+(`public/ponte-quotex/ponte.py`, baixável pela página Binárias) usa a biblioteca não oficial
+[pyquotex](https://github.com/cleitonleonel/pyquotex) e entra na conta como se fosse o navegador. Isso
+vai contra os termos da Quotex, que pode bloquear a conta com o saldo dentro, e a CVM já publicou
+alerta sobre a empresa que opera a Quotex. Na binária não existe stop: cada aposta perdida leva o valor
+inteiro, e com payout de 85% é preciso acertar mais de 54% só para empatar.
+
+```mermaid
+sequenceDiagram
+    participant P as Ponte (PC do dono + pyquotex)
+    participant B as Bot (VM)
+    loop a cada 2 s
+        P->>B: POST /ponte/quotex (conta demo ou real, saldo, ativos e payout, velas de 1 min, resultados)
+        B-->>P: ativos para acompanhar e apostas pendentes
+    end
+    Note over B: a cada 10 s, vela nova fechada, lê o sinal e passa por avaliarAposta
+    B->>B: aposta aprovada fica pendente (apostas)
+    P->>P: buy na Quotex e check_win até fechar
+    P->>B: aberta (id da Quotex) e depois ganhou ou perdeu
+```
+
+- **Conta Quotex** só na página Binárias (não aparece em Contas): sem chave de API; o painel mostra uma
+  vez o **token da ponte** (no banco, só o hash). O e-mail e a senha da Quotex ficam só no `ponte.env`
+  do computador do dono e nunca vão para o bot.
+- **Simulação = conta demo da própria Quotex** (aposta de verdade com saldo de treino). Real = as três
+  chaves de sempre e, além delas, a ponte rodando com `PONTE_CONTA=real`. Aposta de uma conta com a
+  ponte na outra é recusada no bot e na ponte.
+- **Sinal** (`src/binarias/regras.ts`, velas de 1 min da própria Quotex): *repique* (padrão) aposta na
+  volta depois do exagero (IFR anterior abaixo de 30 e vela verde → CALL; acima de 70 e vela vermelha
+  → PUT); *tendência* aposta a favor do movimento (médias de 20 e 50, MACD e IFR).
+- **Risco** (`avaliarAposta`, em `src/risco.ts`): valor fixo (nunca dobra depois de perder), uma
+  aposta por vez (também garantido por índice no banco), payout mínimo, intervalo, teto de apostas e
+  de perda no dia, e para no dia depois de N perdas seguidas. Prazos de 1 a 5 min.
+- **A ponte não decide nada**: recusa aposta com mais de 15 s, acima de `PONTE_VALOR_MAX` (padrão 10)
+  ou de outra conta. Aposta que a ponte não pega em 20 s expira; sem resultado, vira erro para conferir
+  no histórico da Quotex (a ponte nunca inventa resultado). O lucro gravado é o calculado pelo payout
+  da hora; o saldo que a ponte manda é o da Quotex.
+- O painel mostra, por estratégia, a taxa de acerto real ao lado da que o payout exige para empatar.
+
 ## Escritório virtual
 
 A página tem dois modos (botões no topo; o padrão é **Ao vivo**):
@@ -365,6 +406,8 @@ src/
   brokers/             ccxt.ts (exchanges reais e cotação pública), simulacao.ts
   routes/api.ts        API do painel (login, contas, estratégias, sinais, ordens, auditoria)
   routes/webhook.ts    POST /webhook/<token>
+  routes/ponte.ts      POST /ponte/sincronizar (MetaTrader 5) e /ponte/quotex (binárias)
+  binarias/            opções binárias na Quotex: regras.ts (sinal, funções puras), index.ts (laço e ponte)
   crypto.ts            cifra das chaves de API e tokens
   scripts/criar-admin.ts
 migrations/            SQL aplicado em ordem na subida

@@ -231,3 +231,102 @@ export function deveAvisarStop(novo: number, ultimoAvisado: number | null, passo
   if (ultimoAvisado === null) return false; // o primeiro stop vai no aviso de compra
   return novo > ultimoAvisado * (1 + passoPct / 100);
 }
+
+// ------------------------------------------------------------------ opções binárias (Quotex)
+//
+// Na binária não tem stop: cada aposta perde o valor inteiro ou ganha o payout. Então o risco fica
+// todo no tamanho e na quantidade de apostas: valor fixo, uma por vez, teto de apostas e de perda
+// no dia, e para no dia depois de N perdas seguidas. Nenhuma regra aumenta o valor depois de perder
+// (martingale não existe aqui). Simulação = conta demo da Quotex; real = as três chaves.
+
+export interface EstadoAposta {
+  paradaGeral: boolean;
+  realNoServidor: boolean;
+  conta: { modo: 'simulacao' | 'real' };
+  binaria: {
+    ativa: boolean;
+    real: boolean;
+    valor: number;
+    payout_min: number;
+    max_apostas_dia: number;
+    perda_max_dia: number;
+    perdas_seguidas_max: number;
+    intervalo_min_seg: number;
+  };
+  /** a ponte falou com o bot há pouco (o programa está aberto e logado) */
+  ponteOnline: boolean;
+  /** em que conta da Quotex a ponte está logada (PONTE_CONTA no computador do dono) */
+  ponteConta: 'demo' | 'real' | null;
+  ativo: { aberto: boolean; payout: number | null } | null;
+  /** saldo da conta que vai ser usada (demo ou real), se a ponte informou */
+  saldo: number | null;
+  /** o que já foi apostado hoje (fuso de São Paulo), sem contar as que deram erro ou expiraram */
+  apostasHoje: number;
+  /** perda líquida do dia: soma dos lucros negativos e positivos, com o sinal trocado (0 se está no lucro) */
+  perdaHoje: number;
+  /** perdas seguidas na ponta (do resultado mais recente para trás, até o primeiro ganho) */
+  perdasSeguidas: number;
+  emAndamento: boolean;
+  ultimaApostaEm: Date | null;
+  agora: Date;
+}
+
+export type DecisaoAposta =
+  | { aprovado: true; modo: 'simulacao' | 'real'; valor: number; payout: number }
+  | { aprovado: false; situacao: 'rejeitado' | 'ignorado'; motivo: string };
+
+/** Taxa de acerto para empatar com um payout (%): com 85%, é preciso acertar mais de 54,05%. */
+export function acertoParaEmpatar(payoutPct: number): number {
+  return 100 / (1 + payoutPct / 100);
+}
+
+/** Lucro líquido de uma aposta pelo resultado: ganhou = valor x payout; perdeu = -valor; empate = 0. */
+export function lucroDaAposta(resultado: 'ganhou' | 'perdeu' | 'empate', valor: number, payoutPct: number): number {
+  if (resultado === 'ganhou') return Math.round(valor * payoutPct) / 100;
+  if (resultado === 'perdeu') return -valor;
+  return 0;
+}
+
+export function avaliarAposta(e: EstadoAposta): DecisaoAposta {
+  const b = e.binaria;
+  const naoAposta = (motivo: string, situacao: 'rejeitado' | 'ignorado' = 'rejeitado'): DecisaoAposta => ({ aprovado: false, situacao, motivo });
+
+  if (e.paradaGeral) return naoAposta('parada geral ligada: nenhuma aposta sai');
+  if (!b.ativa) return naoAposta('estratégia desativada');
+
+  let modo: 'simulacao' | 'real' = 'simulacao';
+  if (b.real) {
+    if (!e.realNoServidor) return naoAposta('estratégia em modo real, mas o dinheiro real está desligado no servidor (BOT_LIVE_ENABLED)');
+    if (e.conta.modo !== 'real') return naoAposta('estratégia em modo real, mas a conta está em simulação (demo)');
+    modo = 'real';
+  }
+
+  if (e.emAndamento) return naoAposta('já tem uma aposta em andamento: uma por vez', 'ignorado');
+  if (!e.ponteOnline) return naoAposta('a ponte da Quotex não está ligada (o programa no seu computador está aberto?)');
+  const precisa = modo === 'real' ? 'real' : 'demo';
+  if (e.ponteConta !== precisa) {
+    return naoAposta(
+      modo === 'real'
+        ? 'estratégia em real, mas a ponte está na conta demo (PONTE_CONTA=real no ponte.env para apostar dinheiro de verdade)'
+        : 'estratégia em simulação, mas a ponte está na conta real: simulação só aposta na demo',
+    );
+  }
+  if (!e.ativo) return naoAposta('a ponte ainda não mandou este ativo');
+  if (!e.ativo.aberto) return naoAposta('ativo fechado na Quotex agora');
+  if (e.ativo.payout === null) return naoAposta('a Quotex não informou o payout deste prazo');
+  if (e.ativo.payout < b.payout_min) {
+    return naoAposta(`payout de ${e.ativo.payout}% abaixo do mínimo da estratégia (${b.payout_min}%): precisaria acertar ${acertoParaEmpatar(e.ativo.payout).toFixed(1)}% só para empatar`);
+  }
+
+  if (e.ultimaApostaEm) {
+    const passou = (e.agora.getTime() - e.ultimaApostaEm.getTime()) / 1000;
+    if (passou < b.intervalo_min_seg) return naoAposta(`intervalo mínimo entre apostas: faltam ${Math.ceil(b.intervalo_min_seg - passou)} s`, 'ignorado');
+  }
+  if (e.apostasHoje >= b.max_apostas_dia) return naoAposta(`já fez ${e.apostasHoje} apostas hoje (máximo ${b.max_apostas_dia}): volta amanhã`);
+  if (e.perdasSeguidas >= b.perdas_seguidas_max) return naoAposta(`${e.perdasSeguidas} perdas seguidas (máximo ${b.perdas_seguidas_max}): parou por hoje`);
+  if (e.perdaHoje + b.valor > b.perda_max_dia) {
+    return naoAposta(`perda do dia: já perdeu ${e.perdaHoje.toFixed(2)}, mais ${b.valor.toFixed(2)} passa do limite de ${b.perda_max_dia.toFixed(2)}`);
+  }
+  if (e.saldo !== null && b.valor > e.saldo) return naoAposta(`saldo de ${e.saldo.toFixed(2)} não cobre a aposta de ${b.valor.toFixed(2)}`);
+  return { aprovado: true, modo, valor: b.valor, payout: e.ativo.payout };
+}

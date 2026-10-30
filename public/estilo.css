@@ -890,3 +890,7 @@ body.na-entrada { overflow: hidden; }
   .traco-anima { stroke-dashoffset: 0; }
   .area-anima { opacity: 1; }
 }
+
+/* binárias: resultado da aposta */
+.positivo { color: var(--ok); }
+.negativo { color: var(--perigo); }

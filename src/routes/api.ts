@@ -10,6 +10,7 @@ import { B3, cotacaoPublica, exchangesSuportadas, mercadosDa, MT5, paresDaMoeda,
 import { confirmarAlerta, recusarAlerta } from '../assistente/index.js';
 import { desligarTelegram, enviar as enviarTelegram, lerTelegram, salvarToken } from '../assistente/telegram.js';
 import { criarPilotoPadrao, POR_MOEDA, POR_MOEDA_REPIQUE } from '../piloto/index.js';
+import { PONTE_ONLINE_MS, QUOTEX, type Binaria } from '../binarias/index.js';
 import { moedas } from '../brokers/tipos.js';
 import { iniciarAnalise } from '../analise/index.js';
 import { agentePronto, iniciarTeste, lerConfig, salvarConfig, type ConfigAgente } from '../agente/index.js';
@@ -219,7 +220,7 @@ const esquemaConta = z.object({
 });
 
 api.get('/contas', async (_req, res) => {
-  const contas = await query<Conta>('select * from contas order by nome');
+  const contas = await query<Conta>('select * from contas where exchange <> $1 order by nome', [QUOTEX]);
   res.json(contas.map(contaPublica));
 });
 
@@ -273,7 +274,7 @@ api.patch('/contas/:id', async (req, res) => {
     validar(esquemaConta.omit({ saldo_inicial: true, exchange: true }).partial().extend({ apagar_chaves: z.boolean().optional() }), req.body),
     req.body,
   );
-  const atual = await umOuNada<Conta>('select * from contas where id = $1', [contaId]);
+  const atual = await umOuNada<Conta>(`select * from contas where id = $1 and exchange <> 'quotex'`, [contaId]);
   if (!atual) return void res.status(404).json({ erro: 'conta não existe' });
 
   const novaKey = d.apagar_chaves ? null : d.api_key ? cifrar(d.api_key, chave) : atual.api_key_cifrada;
@@ -303,7 +304,7 @@ api.patch('/contas/:id', async (req, res) => {
 
 /** Confere se a exchange responde: cotação pública e, se houver chave, o saldo. */
 api.post('/contas/:id/testar', async (req, res) => {
-  const conta = await umOuNada<Conta>('select * from contas where id = $1', [id(req)]);
+  const conta = await umOuNada<Conta>(`select * from contas where id = $1 and exchange <> 'quotex'`, [id(req)]);
   if (!conta) return void res.status(404).json({ erro: 'conta não existe' });
   const resultado: { publico: string; privado?: string; saldos?: Record<string, number> } = { publico: 'ok' };
   try {
@@ -425,7 +426,7 @@ api.get('/estrategias', async (_req, res) => {
 api.post('/estrategias', async (req, res) => {
   const d = validar(esquemaEstrategia, req.body);
   conferirLimites(d);
-  const conta = await umOuNada<Conta>('select * from contas where id = $1', [d.conta_id]);
+  const conta = await umOuNada<Conta>(`select * from contas where id = $1 and exchange <> 'quotex'`, [d.conta_id]);
   if (!conta) throw new ErroPedido('conta não existe');
   if (d.real && conta.modo !== 'real') throw new ErroPedido('só dá para marcar como real uma estratégia de conta real');
   await conferirSimbolo(conta.exchange, d.simbolo);
@@ -562,7 +563,7 @@ api.post('/estrategias/:id/ordem', async (req, res) => {
  */
 api.post('/estrategias/todas-as-moedas', async (req, res) => {
   const d = validar(z.object({ conta_id: z.number().int().positive(), moeda: z.string().trim().toUpperCase().min(2).max(10).default('BRL'), estilo: z.enum(['tendencia', 'repique']).default('repique') }), req.body);
-  const conta = await umOuNada<Conta>('select * from contas where id = $1', [d.conta_id]);
+  const conta = await umOuNada<Conta>(`select * from contas where id = $1 and exchange <> 'quotex'`, [d.conta_id]);
   if (!conta) throw new ErroPedido('conta não existe');
   const pares = await paresDaMoeda(conta.exchange, d.moeda, 500_000).catch((e: Error) => {
     throw new ErroPedido(`não consegui listar os pares da ${conta.exchange}: ${e.message}`.slice(0, 200));
@@ -1006,6 +1007,162 @@ api.get('/agente/execucoes/:id', async (req, res) => {
   const a = await umOuNada('select * from agente_execucoes where id = $1', [id(req)]);
   if (!a) return void res.status(404).json({ erro: 'execução não existe' });
   res.json(a);
+});
+
+// ------------------------------------------------------------------ opções binárias (Quotex)
+//
+// A conta "quotex" mora na tabela contas (modo simulação = conta demo da Quotex), mas é cuidada só
+// por aqui: não tem chave de API, e sim o token da ponte que roda no computador do dono.
+
+const esquemaBinaria = z.object({
+  nome: z.string().trim().min(1).max(80),
+  conta_id: z.number().int().positive(),
+  ativo: z.string().trim().regex(/^[A-Za-z0-9_#.-]{2,40}$/, 'ativo inválido'),
+  ativa: z.boolean().default(false),
+  real: z.boolean().default(false),
+  estilo: z.enum(['repique', 'tendencia']).default('repique'),
+  prazo_s: z.union([z.literal(60), z.literal(120), z.literal(180), z.literal(300)]).default(300),
+  valor: z.number().positive().max(10_000),
+  payout_min: z.number().min(50).max(100).default(85),
+  max_apostas_dia: z.number().int().min(1).max(200).default(10),
+  perda_max_dia: z.number().positive().max(100_000),
+  perdas_seguidas_max: z.number().int().min(1).max(20).default(3),
+  intervalo_min_seg: z.number().int().min(0).max(86_400).default(300),
+});
+
+function contaQuotex(c: Conta) {
+  const info = c.ponte_info ?? {};
+  return {
+    id: c.id,
+    nome: c.nome,
+    modo: c.modo,
+    token_prefixo: c.ponte_token_prefixo ?? null,
+    visto_em: c.ponte_visto_em ?? null,
+    online: Boolean(c.ponte_visto_em && Date.now() - new Date(c.ponte_visto_em).getTime() < PONTE_ONLINE_MS),
+    // em que conta da Quotex a ponte está logada e o saldo dela (sem e-mail nem senha: eles não vêm para cá)
+    conta: (info.conta as string | undefined) ?? null,
+    saldo: (info.saldo as number | undefined) ?? null,
+    moeda: (info.moeda as string | undefined) ?? null,
+  };
+}
+
+api.get('/binarias', async (_req, res) => {
+  const [contas, estrategias, apostas, mercado] = await Promise.all([
+    query<Conta>('select * from contas where exchange = $1 order by nome', [QUOTEX]),
+    query(
+      `select b.*, c.nome as conta, c.modo as conta_modo,
+              coalesce(h.apostas, 0)::int as apostas_hoje, coalesce(h.lucro, 0) as lucro_hoje,
+              coalesce(t.ganhou, 0)::int as ganhou, coalesce(t.perdeu, 0)::int as perdeu, coalesce(t.lucro, 0) as lucro_total
+         from binarias b join contas c on c.id = b.conta_id
+         left join lateral (
+           select count(*) filter (where situacao not in ('erro', 'expirada')) as apostas, sum(lucro) as lucro from apostas
+            where binaria_id = b.id and criada_em >= (date_trunc('day', now() at time zone $1) at time zone $1)) h on true
+         left join lateral (
+           select count(*) filter (where situacao = 'ganhou') as ganhou, count(*) filter (where situacao = 'perdeu') as perdeu, sum(lucro) as lucro
+             from apostas where binaria_id = b.id) t on true
+        order by b.nome`,
+      [config.fuso],
+    ),
+    query(
+      `select a.id, a.binaria_id, b.nome as estrategia, a.modo, a.ativo, a.direcao, a.valor, a.prazo_s, a.payout, a.motivo,
+              a.situacao, a.lucro, a.erro, a.criada_em, a.terminada_em
+         from apostas a join binarias b on b.id = a.binaria_id order by a.criada_em desc limit 60`,
+    ),
+    query(
+      `select ativo, nome, aberto, payout_1m, payout_5m, atualizado_em, jsonb_array_length(velas) as velas
+         from quotex_mercado where atualizado_em > now() - interval '15 minutes'
+        order by aberto desc, coalesce(payout_5m, payout_1m, 0) desc, ativo limit 300`,
+    ),
+  ]);
+  res.json({ real_no_servidor: config.realLiberadoNoServidor, contas: contas.map(contaQuotex), estrategias, apostas, mercado });
+});
+
+api.post('/binarias/contas', async (req, res) => {
+  const d = validar(z.object({ nome: z.string().trim().min(1).max(80) }), req.body);
+  const t = novoToken();
+  const r = await query<Conta>(
+    `insert into contas (nome, exchange, modo, ponte_token_hash, ponte_token_prefixo) values ($1, $2, 'simulacao', $3, $4) returning *`,
+    [d.nome, QUOTEX, t.hash, t.prefixo],
+  );
+  const conta = r[0]!;
+  await evento(req.usuarioId, 'conta_criada', { conta: conta.id, exchange: QUOTEX, modo: conta.modo });
+  // já sai uma estratégia desligada, para a ponte começar a mandar as velas do ativo
+  await query(
+    `insert into binarias (nome, conta_id, ativo, valor, perda_max_dia) values ($1, $2, 'EURUSD_otc', 5, 15)`,
+    [`Binárias EUR/USD (${conta.nome})`, conta.id],
+  );
+  // o token só aparece agora; no banco fica só o hash
+  res.status(201).json({ ...contaQuotex(conta), ponte_token: t.token, url_bot: config.urlPublica });
+});
+
+api.patch('/binarias/contas/:id', async (req, res) => {
+  const contaId = id(req);
+  const d = soEnviados(validar(z.object({ nome: z.string().trim().min(1).max(80), modo: z.enum(['simulacao', 'real']) }).partial(), req.body), req.body);
+  const atual = await umOuNada<Conta>('select * from contas where id = $1 and exchange = $2', [contaId, QUOTEX]);
+  if (!atual) return void res.status(404).json({ erro: 'conta da Quotex não existe' });
+  const modo = d.modo ?? atual.modo;
+  // conta voltou para demo: nenhuma estratégia dela pode continuar marcada como real
+  if (modo === 'simulacao') await query('update binarias set real = false where conta_id = $1 and real', [contaId]);
+  const r = await query<Conta>('update contas set nome = $2, modo = $3 where id = $1 returning *', [contaId, d.nome ?? atual.nome, modo]);
+  await evento(req.usuarioId, 'conta_alterada', { conta: contaId, campos: Object.keys(d), modo_antes: atual.modo, modo_depois: modo });
+  res.json(contaQuotex(r[0]!));
+});
+
+api.post('/binarias/contas/:id/novo-token', async (req, res) => {
+  const contaId = id(req);
+  const t = novoToken();
+  const r = await query('update contas set ponte_token_hash = $2, ponte_token_prefixo = $3 where id = $1 and exchange = $4 returning id', [contaId, t.hash, t.prefixo, QUOTEX]);
+  if (!r.length) return void res.status(404).json({ erro: 'conta da Quotex não existe' });
+  await evento(req.usuarioId, 'token_ponte_trocado', { conta: contaId });
+  res.json({ ponte_token: t.token, url_bot: config.urlPublica });
+});
+
+api.post('/binarias', async (req, res) => {
+  const d = validar(esquemaBinaria, req.body);
+  const conta = await umOuNada<Conta>('select * from contas where id = $1 and exchange = $2', [d.conta_id, QUOTEX]);
+  if (!conta) throw new ErroPedido('escolha uma conta da Quotex');
+  if (d.real && conta.modo !== 'real') throw new ErroPedido('só dá para marcar como real uma estratégia de conta real');
+  if (d.valor > d.perda_max_dia) throw new ErroPedido('a perda máxima do dia tem de ser pelo menos o valor de uma aposta');
+  const r = await query<{ id: number }>(
+    `insert into binarias (nome, conta_id, ativo, ativa, real, estilo, prazo_s, valor, payout_min, max_apostas_dia, perda_max_dia,
+                           perdas_seguidas_max, intervalo_min_seg)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning id`,
+    [d.nome, d.conta_id, d.ativo, d.ativa, d.real, d.estilo, d.prazo_s, d.valor, d.payout_min, d.max_apostas_dia, d.perda_max_dia,
+      d.perdas_seguidas_max, d.intervalo_min_seg],
+  );
+  await evento(req.usuarioId, 'binaria_criada', { binaria: r[0]!.id, real: d.real });
+  res.status(201).json({ id: r[0]!.id });
+});
+
+api.patch('/binarias/:id', async (req, res) => {
+  const binId = id(req);
+  const d = soEnviados(validar(esquemaBinaria.omit({ conta_id: true }).partial(), req.body), req.body);
+  const atual = await umOuNada<Binaria & { conta_modo: string }>(
+    'select b.*, c.modo as conta_modo from binarias b join contas c on c.id = b.conta_id where b.id = $1',
+    [binId],
+  );
+  if (!atual) return void res.status(404).json({ erro: 'estratégia não existe' });
+  const novo = { ...atual, ...d };
+  if (novo.real && atual.conta_modo !== 'real') throw new ErroPedido('só dá para marcar como real uma estratégia de conta real');
+  if (Number(novo.valor) > Number(novo.perda_max_dia)) throw new ErroPedido('a perda máxima do dia tem de ser pelo menos o valor de uma aposta');
+  await query(
+    `update binarias set nome = $2, ativo = $3, ativa = $4, real = $5, estilo = $6, prazo_s = $7, valor = $8, payout_min = $9,
+            max_apostas_dia = $10, perda_max_dia = $11, perdas_seguidas_max = $12, intervalo_min_seg = $13 where id = $1`,
+    [binId, novo.nome, novo.ativo, novo.ativa, novo.real, novo.estilo, novo.prazo_s, novo.valor, novo.payout_min, novo.max_apostas_dia,
+      novo.perda_max_dia, novo.perdas_seguidas_max, novo.intervalo_min_seg],
+  );
+  await evento(req.usuarioId, 'binaria_alterada', { binaria: binId, campos: Object.keys(d), real_antes: atual.real, real_depois: novo.real });
+  res.json({ ok: true });
+});
+
+api.delete('/binarias/:id', async (req, res) => {
+  const binId = id(req);
+  const [uso] = await query<{ n: number }>('select count(*)::int as n from apostas where binaria_id = $1', [binId]);
+  if (uso && uso.n > 0) throw new ErroPedido('esta estratégia já tem apostas no histórico: desative em vez de apagar');
+  const r = await query('delete from binarias where id = $1 returning id', [binId]);
+  if (!r.length) return void res.status(404).json({ erro: 'estratégia não existe' });
+  await evento(req.usuarioId, 'binaria_apagada', { binaria: binId });
+  res.json({ ok: true });
 });
 
 // ------------------------------------------------------------------ erros

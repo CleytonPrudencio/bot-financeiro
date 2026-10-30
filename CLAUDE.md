@@ -37,6 +37,11 @@ Escreva em português do Brasil, código e comentários inclusive.
     Só o chat pareado do Telegram responde; o token do bot fica cifrado.
 13. PATCH só muda os campos enviados (`soEnviados`): os `.default()` do zod não podem sobrescrever o
     que não veio.
+14. **Binárias (conta `quotex`, `src/binarias/`)**: toda aposta passa por `avaliarAposta`
+    (`src/risco.ts`) dentro da trava da estratégia (`pg_advisory_xact_lock(3, id)`). Valor sempre o
+    da estratégia: nada de martingale. Simulação = conta demo da Quotex; real = as três chaves e a
+    ponte com `PONTE_CONTA=real`. A senha da Quotex nunca vem para o bot, e a ponte nunca inventa
+    resultado (sem resposta, a aposta vira erro para conferir na Quotex).
 
 ## Comandos
 

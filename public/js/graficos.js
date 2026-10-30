@@ -161,13 +161,13 @@ export function rosca(partes, centro, subcentro) {
 }
 
 /** Barra de uso (ex.: gasto do dia sobre o limite). */
-export function barraUso(usado, limite, rotulo) {
+export function barraUso(usado, limite, rotulo, formatar = fmt) {
   const fr = limite > 0 ? Math.min(1, usado / limite) : 0;
   const nivel = fr >= 0.9 ? 'perigo' : fr >= 0.65 ? 'alerta' : 'ok';
   return h(
     'div',
     { class: 'uso' },
-    h('div', { class: 'uso-topo' }, h('span', { class: 'suave' }, rotulo), h('span', { class: 'mono' }, `${fmt(usado)} / ${fmt(limite)}`)),
+    h('div', { class: 'uso-topo' }, h('span', { class: 'suave' }, rotulo), h('span', { class: 'mono' }, `${formatar(usado)} / ${formatar(limite)}`)),
     h('div', { class: 'uso-trilho' }, h('div', { class: `uso-barra uso-${nivel}`, estilo: { '--fr': String(fr) } })),
   );
 }

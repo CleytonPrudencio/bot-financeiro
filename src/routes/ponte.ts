@@ -5,6 +5,7 @@ import { hashToken } from '../crypto.js';
 import { query, transacao, umOuNada } from '../db.js';
 import { logger } from '../logger.js';
 import { observarMt5, ORDEM_EXPIRA_S, paraBot, paraMt5, MT5 } from '../brokers/mt5.js';
+import { QUOTEX, sincronizarPonte } from '../binarias/index.js';
 
 // POST /ponte/sincronizar: a ponte MetaTrader 5 (no Windows do dono) liga para cá a cada 1 a 2 s.
 // Manda cotações, velas, o saldo e o resultado das ordens que executou; leva a lista de ações para
@@ -121,5 +122,61 @@ ponte.post(
         idade_s: c.idade_s,
       })),
     });
+  },
+);
+
+// ------------------------------------------------------------------ ponte Quotex (opções binárias)
+//
+// POST /ponte/quotex: a ponte da Quotex (public/ponte-quotex/ponte.py, no computador do dono) liga
+// para cá a cada 2 s. Manda a conta em que está logada (demo ou real) e o saldo, os ativos com
+// payout, as velas de 1 min dos ativos das estratégias e o que aconteceu com as apostas; leva as
+// apostas pendentes, que já passaram por `avaliarAposta` (src/risco.ts). A senha da Quotex fica só
+// no computador do dono: aqui chega o token da conta (Authorization: Bearer).
+
+const velaQuotex = z.array(numero).min(5).max(6);
+const esquemaQuotex = z.object({
+  versao: z.string().max(20).optional(),
+  conta: z
+    .object({
+      conta: z.enum(['demo', 'real']),
+      saldo: numero.min(0).optional(),
+      moeda: z.string().max(10).optional(),
+    })
+    .optional(),
+  mercado: z
+    .array(
+      z.object({
+        ativo: z.string().trim().regex(/^[A-Za-z0-9_#.-]{2,40}$/),
+        nome: z.string().max(80).optional(),
+        aberto: z.boolean(),
+        payout_1m: numero.min(0).max(100).nullable().optional(),
+        payout_5m: numero.min(0).max(100).nullable().optional(),
+        velas: z.array(velaQuotex).max(300).optional(),
+      }),
+    )
+    .max(400)
+    .optional(),
+  abertas: z
+    .array(z.object({ id: z.number().int().positive(), ok: z.boolean(), id_quotex: z.string().max(80).optional(), erro: z.string().max(500).optional() }))
+    .max(50)
+    .optional(),
+  fechadas: z
+    .array(z.object({ id: z.number().int().positive(), resultado: z.enum(['ganhou', 'perdeu', 'empate']), retorno: numero.optional() }))
+    .max(50)
+    .optional(),
+});
+
+ponte.post(
+  '/quotex',
+  rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false }),
+  express.json({ limit: '2mb' }),
+  async (req, res) => {
+    const token = String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
+    if (token.length < 20 || token.length > 100) return void res.status(401).json({ erro: 'token da ponte ausente' });
+    const conta = await umOuNada<{ id: number }>('select id from contas where ponte_token_hash = $1 and exchange = $2', [hashToken(token), QUOTEX]);
+    if (!conta) return void res.status(401).json({ erro: 'token da ponte inválido' });
+    const lido = esquemaQuotex.safeParse(req.body);
+    if (!lido.success) return void res.status(400).json({ erro: `corpo inválido: ${lido.error.issues[0]?.path.join('.') ?? '?'}` });
+    res.json(await sincronizarPonte(conta.id, lido.data));
   },
 );

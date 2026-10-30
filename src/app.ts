@@ -29,8 +29,8 @@ export function criarApp() {
           url: req.url.replace(/^\/webhook\/([A-Za-z0-9_-]{6})[A-Za-z0-9_-]*/, '/webhook/$1…'),
         }),
       },
-      // a ponte MT5 sincroniza a cada 1 a 2 s: só os erros dela vão para o log
-      autoLogging: { ignore: (req) => req.url === '/saude' || req.url === '/ponte/sincronizar' },
+      // as pontes (MT5 e Quotex) sincronizam a cada 1 a 2 s: só os erros delas vão para o log
+      autoLogging: { ignore: (req) => req.url === '/saude' || req.url === '/ponte/sincronizar' || req.url === '/ponte/quotex' },
     }),
   );
 

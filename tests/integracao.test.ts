@@ -648,6 +648,91 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     expect((await painel('POST', '/estrategias/999999/ordem', { acao: 'zerar' })).status).toBe(404);
   });
 
+  it('binárias na Quotex: conta com token, velas da ponte, aposta na demo e o resultado', async () => {
+    const c = await painel('POST', '/binarias/contas', { nome: 'Quotex' });
+    expect(c.status).toBe(201);
+    const tokenPonte = String(c.corpo.ponte_token);
+    expect(tokenPonte.length).toBeGreaterThan(30);
+    expect(c.corpo).toMatchObject({ modo: 'simulacao', online: false });
+    // a conta da Quotex não aparece em Contas, e o token não volta para a tela
+    expect(JSON.stringify((await painel('GET', '/contas')).corpo)).not.toContain('Quotex');
+    expect(JSON.stringify((await painel('GET', '/binarias')).corpo)).not.toContain(tokenPonte);
+    const [bin] = await db.query<{ id: number; ativo: string; ativa: boolean }>('select id, ativo, ativa from binarias where conta_id = $1', [c.corpo.id]);
+    expect(bin).toMatchObject({ ativo: 'EURUSD_otc', ativa: false });
+    expect((await painel('PATCH', `/binarias/${bin!.id}`, { ativa: true, intervalo_min_seg: 0 })).status).toBe(200);
+    // real só com conta real
+    expect((await painel('PATCH', `/binarias/${bin!.id}`, { real: true })).status).toBe(400);
+
+    const { rodadaBinarias, pedirAposta } = await import('../src/binarias/index.js');
+    await rodadaBinarias();
+    const situacao = async () => (await db.query<{ situacao: string }>('select situacao from binarias where id = $1', [bin!.id]))[0]!.situacao;
+    expect(await situacao()).toContain('esperando a ponte');
+
+    const sincronizar = async (corpo: unknown, t = tokenPonte) => {
+      const r = await fetch(`${base}/ponte/quotex`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${t}` },
+        body: JSON.stringify(corpo),
+      });
+      return { status: r.status, corpo: (await r.json()) as { observar: string[]; comandos: { id: number; ativo: string; direcao: string; valor: number; prazo_s: number; conta: string; idade_s: number }[] } };
+    };
+    expect((await sincronizar({}, 'x'.repeat(43))).status).toBe(401);
+    expect((await sincronizar({ conta: { conta: 'outra' } })).status).toBe(400);
+
+    // 80 velas de 1 min caindo (vendido demais) e a última verde: o repique pede CALL
+    const fim = Math.floor(Date.now() / 60_000) * 60_000 - 60_000;
+    const fech = Array.from({ length: 80 }, (_, i) => 1.1 - i * 0.0005);
+    fech.push(fech[fech.length - 1]! + 0.0015);
+    const velasEur = fech.map((f, i) => {
+      const abre = i ? fech[i - 1]! : f;
+      return [fim - (fech.length - 1 - i) * 60_000, abre, Math.max(abre, f), Math.min(abre, f), f];
+    });
+    const r1 = await sincronizar({
+      versao: '1.0',
+      conta: { conta: 'demo', saldo: 1000 },
+      mercado: [{ ativo: 'EURUSD_otc', nome: 'EUR/USD (OTC)', aberto: true, payout_1m: 85, payout_5m: 90, velas: velasEur }],
+    });
+    expect(r1.status).toBe(200);
+    expect(r1.corpo).toEqual({ observar: ['EURUSD_otc'], comandos: [] });
+
+    await rodadaBinarias();
+    expect(await situacao()).toContain('aposta pedida: CALL');
+    const r2 = await sincronizar({});
+    expect(r2.corpo.comandos).toEqual([{ id: expect.any(Number), ativo: 'EURUSD_otc', direcao: 'call', valor: 5, prazo_s: 300, conta: 'demo', idade_s: expect.any(Number) }]);
+    const apostaId = r2.corpo.comandos[0]!.id;
+
+    // a ponte confirmou: aposta correndo; outra não sai enquanto esta não acabar
+    await sincronizar({ abertas: [{ id: apostaId, ok: true, id_quotex: 'q-123' }] });
+    expect(await pedirAposta(bin!.id, 'put', 'teste')).toMatchObject({ ok: false, decisao: { motivo: expect.stringContaining('uma por vez') } });
+    await sincronizar({ fechadas: [{ id: apostaId, resultado: 'perdeu', retorno: 0 }] });
+    const [aposta] = await db.query<Record<string, unknown>>('select * from apostas where id = $1', [apostaId]);
+    expect(aposta).toMatchObject({ situacao: 'perdeu', modo: 'simulacao', id_quotex: 'q-123', payout: 90 });
+    expect(Number(aposta!.lucro)).toBe(-5);
+
+    // as três chaves: conta e estratégia em real, mas sem BOT_LIVE_ENABLED a aposta não sai
+    expect((await painel('PATCH', `/binarias/contas/${c.corpo.id}`, { modo: 'real' })).status).toBe(200);
+    expect((await painel('PATCH', `/binarias/${bin!.id}`, { real: true })).status).toBe(200);
+    expect(await pedirAposta(bin!.id, 'call', 'teste')).toMatchObject({ ok: false, decisao: { motivo: expect.stringContaining('BOT_LIVE_ENABLED') } });
+    // conta de volta para demo desliga o real da estratégia
+    await painel('PATCH', `/binarias/contas/${c.corpo.id}`, { modo: 'simulacao' });
+    expect((await db.query<{ real: boolean }>('select real from binarias where id = $1', [bin!.id]))[0]!.real).toBe(false);
+
+    // aposta que esperou demais não vai para a ponte: expira
+    await db.query(`insert into apostas (binaria_id, conta_id, modo, ativo, direcao, valor, prazo_s, payout, criada_em)
+                    values ($1, $2, 'simulacao', 'EURUSD_otc', 'call', 5, 300, 90, now() - interval '1 minute')`, [bin!.id, c.corpo.id]);
+    expect((await sincronizar({})).corpo.comandos).toEqual([]);
+    const [velha] = await db.query<{ situacao: string }>('select situacao from apostas order by id desc limit 1');
+    expect(velha!.situacao).toBe('expirada');
+
+    const painelBin = await painel('GET', '/binarias');
+    expect(painelBin.corpo).toMatchObject({
+      contas: [{ nome: 'Quotex', online: true, conta: 'demo', saldo: 1000 }],
+      estrategias: [{ id: bin!.id, ganhou: 0, perdeu: 1, apostas_hoje: 1 }],
+    });
+    // com apostas no histórico, não apaga: desativa
+    expect((await painel('DELETE', `/binarias/${bin!.id}`)).status).toBe(400);
+  });
+
   it('auditoria registrou as ações do painel', async () => {
     const tipos = (await db.query<{ tipo: string }>('select tipo from eventos')).map((e) => e.tipo);
     expect(tipos).toEqual(expect.arrayContaining(['login', 'conta_criada', 'estrategia_criada', 'parada_ligada', 'parada_desligada']));

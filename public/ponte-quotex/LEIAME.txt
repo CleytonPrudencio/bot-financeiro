@@ -1,0 +1,24 @@
+PONTE QUOTEX DO BOT FINANCEIRO (opções binárias)
+
+ANTES DE TUDO
+- A Quotex não tem API oficial. Esta ponte usa a biblioteca pyquotex (não oficial), que entra na
+  conta como se fosse o navegador. Isso vai contra os termos de uso da Quotex, e ela pode bloquear
+  a conta, inclusive com saldo dentro. A CVM já publicou alerta sobre a empresa que opera a Quotex.
+- Opção binária não tem stop: cada aposta perdida leva o valor inteiro. Com payout de 85%, é
+  preciso acertar mais de 54% só para empatar.
+- Comece na conta DEMO (PONTE_CONTA=demo) e veja a taxa de acerto no painel antes de pensar em real.
+
+COMO LIGAR
+1. Instale o Python 3.12 ou mais novo (python.org), marcando "Add Python to PATH".
+2. Ponha ponte.py, iniciar.bat e ponte.env.exemplo numa pasta. Copie ponte.env.exemplo para
+   ponte.env e preencha: o PONTE_TOKEN que o painel mostrou ao criar a conta Quotex, e o seu
+   e-mail e senha da Quotex (ficam só neste computador).
+3. Dê dois cliques em iniciar.bat. Na primeira vez a Quotex pode mandar um código por e-mail: a
+   janela pede, você digita. A janela deve mostrar "Quotex conectada" e "ponte ligada ao bot".
+4. No painel do bot (Binárias), ative a estratégia. Deixe a janela da ponte aberta enquanto quiser
+   que o bot aposte.
+
+A ponte só liga para o bot (não precisa abrir porta no roteador). Ela nunca decide nada: só aposta
+o que o bot já aprovou, e recusa aposta velha (mais de 15 s), acima do teto PONTE_VALOR_MAX ou de
+outra conta (real com a ponte em demo, ou o contrário).
+Para parar tudo: feche a janela da ponte, ou use a parada geral no painel do bot.
