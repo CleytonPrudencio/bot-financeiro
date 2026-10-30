@@ -5,11 +5,11 @@ import { apagarSessao, entrar, exigeCabecalhoPainel, exigeLogin, gravarSessao } 
 import { config } from '../config.js';
 import { cifrar, derivarChave, novoToken } from '../crypto.js';
 import { query, transacao, umOuNada } from '../db.js';
-import { corretoraReal, type Conta, type Estrategia } from '../motor.js';
-import { B3, cotacaoPublica, exchangesSuportadas, mercadosDa, MT5, velasDiarias } from '../brokers/mercado.js';
+import { corretoraReal, ORIGEM_PAINEL, processarSinalDa, type Conta, type Estrategia } from '../motor.js';
+import { B3, cotacaoPublica, exchangesSuportadas, mercadosDa, MT5, paresDaMoeda, velasDiarias } from '../brokers/mercado.js';
 import { confirmarAlerta, recusarAlerta } from '../assistente/index.js';
 import { desligarTelegram, enviar as enviarTelegram, lerTelegram, salvarToken } from '../assistente/telegram.js';
-import { criarPilotoPadrao } from '../piloto/index.js';
+import { criarPilotoPadrao, POR_MOEDA } from '../piloto/index.js';
 import { moedas } from '../brokers/tipos.js';
 import { iniciarAnalise } from '../analise/index.js';
 import { agentePronto, iniciarTeste, lerConfig, salvarConfig, type ConfigAgente } from '../agente/index.js';
@@ -539,6 +539,42 @@ api.post('/alertas/:id/recusar', async (req, res) => {
   if (!r.ok) throw new ErroPedido(r.texto);
   await evento(req.usuarioId, 'alerta_recusado', { alerta: id(req) });
   res.json(r);
+});
+
+// ------------------------------------------------------------------ ordem manual e uma estratégia por moeda
+
+/**
+ * Ordem do dono pelo painel (botões Comprar e Vender): o mesmo caminho do webhook e do piloto, com
+ * as regras de risco, os limites e as três chaves do dinheiro real. Só não passa pela IA: a decisão é dele.
+ */
+api.post('/estrategias/:id/ordem', async (req, res) => {
+  const d = validar(z.object({ acao: z.enum(['comprar', 'vender', 'zerar']), valor: z.number().positive().optional(), quantidade: z.number().positive().optional() }), req.body);
+  const r = await processarSinalDa(id(req), { ...d, id: `painel-${Date.now()}` }, ORIGEM_PAINEL);
+  if (r.status === 404) return void res.status(404).json({ erro: 'estratégia não existe' });
+  await evento(req.usuarioId, 'ordem_manual', { estrategia: id(req), ...d, situacao: r.situacao });
+  res.json({ situacao: r.situacao, motivo: r.motivo ?? null });
+});
+
+/**
+ * Cria, numa conta, uma estratégia de piloto para cada par da moeda com volume que ainda não tem
+ * estratégia (ex.: todos os pares em BRL da Binance). Saem em SIMULAÇÃO: operar real é um passo do dono.
+ */
+api.post('/estrategias/todas-as-moedas', async (req, res) => {
+  const d = validar(z.object({ conta_id: z.number().int().positive(), moeda: z.string().trim().toUpperCase().min(2).max(10).default('BRL') }), req.body);
+  const conta = await umOuNada<Conta>('select * from contas where id = $1', [d.conta_id]);
+  if (!conta) throw new ErroPedido('conta não existe');
+  const pares = await paresDaMoeda(conta.exchange, d.moeda, 500_000).catch((e: Error) => {
+    throw new ErroPedido(`não consegui listar os pares da ${conta.exchange}: ${e.message}`.slice(0, 200));
+  });
+  const existentes = new Set((await query<{ simbolo: string }>('select simbolo from estrategias where conta_id = $1', [conta.id])).map((e) => e.simbolo));
+  const criadas: string[] = [];
+  for (const p of pares.slice(0, 30)) {
+    if (existentes.has(p.simbolo)) continue;
+    await criarPilotoPadrao(conta.id, `Piloto ${p.simbolo.split('/')[0]}`, p.simbolo, conta.exchange === B3 ? { ...POR_MOEDA, tempo: '1d', intervaloMin: 10 } : POR_MOEDA);
+    criadas.push(p.simbolo);
+  }
+  await evento(req.usuarioId, 'estrategias_por_moeda', { conta: conta.id, criadas });
+  res.status(201).json({ criadas, ja_existiam: pares.length - criadas.length });
 });
 
 /** Token novo da ponte MetaTrader 5; o antigo para de valer na hora. */

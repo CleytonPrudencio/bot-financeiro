@@ -73,6 +73,9 @@ export interface Estrategia {
   auto_exigir_virada: boolean;
 }
 
+/** "IP" das ordens que o dono manda pelo painel (botões Comprar e Vender da estratégia). */
+export const ORIGEM_PAINEL = 'painel';
+
 export function politicaIa(e: Estrategia): PoliticaIa {
   return {
     modo: e.ia_modo,
@@ -267,7 +270,7 @@ export async function processarSinalDa(estrategiaId: number, corpo: unknown, ip:
     };
     let preco = precoAntes;
     const politica = politicaIa(est);
-    if (consultaIa(sinal.acao, politica)) {
+    if (consultaIa(sinal.acao, politica, ip === ORIGEM_PAINEL)) {
       const pedido: PedidoParecer = {
         estrategia: est.nome,
         contexto: est.ia_contexto,

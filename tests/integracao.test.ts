@@ -624,6 +624,28 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     expect((lista.corpo as unknown as { situacao: string }[]).map((x) => x.situacao)).toEqual(expect.arrayContaining(['confirmado', 'recusado', 'expirado']));
   });
 
+  it('uma estratégia por moeda e ordem manual do dono (sem esperar a IA)', async () => {
+    const conta = await painel('POST', '/contas', { nome: 'Binance 2', exchange: 'binance', saldo_inicial: { moeda: 'BRL', quantidade: 100 } });
+    const r = await painel('POST', '/estrategias/todas-as-moedas', { conta_id: conta.corpo.id });
+    expect(r.status).toBe(201);
+    expect(r.corpo).toMatchObject({ criadas: ['BTC/BRL', 'ETH/BRL'] });
+    expect((await painel('POST', '/estrategias/todas-as-moedas', { conta_id: conta.corpo.id })).corpo).toMatchObject({ criadas: [] });
+    const [btc] = await db.query<Record<string, unknown>>('select * from estrategias where conta_id = $1 and simbolo = $2', [conta.corpo.id, 'BTC/BRL']);
+    expect(btc).toMatchObject({ nome: 'Piloto BTC', real: false, valor_ordem: 15, ia_modo: 'obrigatorio', auto_varrer: false, auto_tempo: '1m', auto_max_ia_dia: 2, auto_stop_pct: 1.5 });
+
+    // IA obrigatória, mas a ordem é do dono: sai sem consultar a IA, dentro dos limites
+    const pedidos = pedidosIa.length;
+    const compra = await painel('POST', `/estrategias/${btc!.id}/ordem`, { acao: 'comprar', valor: 15 });
+    expect(compra.corpo).toMatchObject({ situacao: 'executado' });
+    expect(pedidosIa.length).toBe(pedidos);
+    expect((await painel('POST', `/estrategias/${btc!.id}/ordem`, { acao: 'comprar', valor: 500 })).corpo).toMatchObject({ situacao: 'rejeitado' });
+    const venda = await painel('POST', `/estrategias/${btc!.id}/ordem`, { acao: 'zerar' });
+    expect(venda.corpo).toMatchObject({ situacao: 'executado' });
+    const [s] = await db.query<{ ip: string }>('select ip from sinais where estrategia_id = $1 order by id desc limit 1', [btc!.id]);
+    expect(s!.ip).toBe('painel');
+    expect((await painel('POST', '/estrategias/999999/ordem', { acao: 'zerar' })).status).toBe(404);
+  });
+
   it('auditoria registrou as ações do painel', async () => {
     const tipos = (await db.query<{ tipo: string }>('select tipo from eventos')).map((e) => e.tipo);
     expect(tipos).toEqual(expect.arrayContaining(['login', 'conta_criada', 'estrategia_criada', 'parada_ligada', 'parada_desligada']));

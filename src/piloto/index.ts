@@ -358,24 +358,38 @@ export const PADRAO = {
  * Cria uma estratégia de piloto com os valores da padrão (R$ 50, varredura, agente obrigatório,
  * stop de 3%), em SIMULAÇÃO, e R$ 50 de saldo simulado na conta se ela ainda não tiver reais.
  */
-export async function criarPilotoPadrao(
-  contaId: number,
-  nome: string,
-  simbolo: string,
-  opcoes: { tempo?: string; intervaloMin?: number } = {},
-): Promise<number> {
+export interface OpcoesPiloto {
+  tempo?: string;
+  intervaloMin?: number;
+  /** varre todos os pares da moeda (padrão) ou fica só no par dado */
+  varrer?: boolean;
+  valor?: number;
+  maxIaDia?: number;
+  stop?: number;
+  alvo?: number;
+  protecao?: number;
+  recuo?: number;
+}
+
+/**
+ * Cria uma estratégia de piloto com os valores da padrão (R$ 50, varredura, agente obrigatório,
+ * stop de 3%), em SIMULAÇÃO, e saldo simulado em reais na conta se ela ainda não tiver.
+ */
+export async function criarPilotoPadrao(contaId: number, nome: string, simbolo: string, opcoes: OpcoesPiloto = {}): Promise<number> {
   const t = novoToken(); // ninguém vê este token: o piloto não precisa dele; o painel gera outro se quiser webhook
+  const valor = opcoes.valor ?? PADRAO.valor;
   const [nova] = await query<{ id: number }>(
     `insert into estrategias (nome, conta_id, simbolo, ativa, real, token_hash, token_prefixo, valor_ordem, limite_por_ordem,
                               limite_diario, limite_posicao, intervalo_min_seg, desvio_max_pct,
                               ia_modo, ia_tipo, ia_falha, ia_confianca_min, ia_nas_vendas, ia_contexto,
                               auto_ligado, auto_stop_pct, auto_alvo_pct, auto_protecao_pct, auto_recuo_pct,
-                              auto_varrer, auto_tempo, auto_intervalo_min, auto_exigir_virada)
+                              auto_varrer, auto_tempo, auto_intervalo_min, auto_exigir_virada, auto_max_ia_dia)
      values ($1, $2, $3, true, false, $4, $5, $6, $6, $6, $6, $7, $8,
              'obrigatorio', 'agente', 'reprova', 0.6, false, $9,
-             true, $10, $11, $12, $13, true, $14, $15, false) returning id`,
-    [nome, contaId, simbolo, t.hash, t.prefixo, PADRAO.valor, PADRAO.intervalo_min_seg, PADRAO.desvio_max_pct,
-      PADRAO.ia_contexto, PADRAO.stop, PADRAO.alvo, PADRAO.protecao, PADRAO.recuo, opcoes.tempo ?? PADRAO.tempo, opcoes.intervaloMin ?? PADRAO.intervalo_min],
+             true, $10, $11, $12, $13, $16, $14, $15, false, $17) returning id`,
+    [nome, contaId, simbolo, t.hash, t.prefixo, valor, PADRAO.intervalo_min_seg, PADRAO.desvio_max_pct,
+      PADRAO.ia_contexto, opcoes.stop ?? PADRAO.stop, opcoes.alvo ?? PADRAO.alvo, opcoes.protecao ?? PADRAO.protecao, opcoes.recuo ?? PADRAO.recuo,
+      opcoes.tempo ?? PADRAO.tempo, opcoes.intervaloMin ?? PADRAO.intervalo_min, opcoes.varrer ?? true, opcoes.maxIaDia ?? 6],
   );
   await query(
     `insert into saldos_simulados (conta_id, moeda, quantidade) values ($1, 'BRL', $2) on conflict (conta_id, moeda) do nothing`,
@@ -383,6 +397,9 @@ export async function criarPilotoPadrao(
   );
   return nova!.id;
 }
+
+/** Valores das estratégias "uma por moeda": velas de 1 min, stop curto, pouca IA por moeda (custo). */
+export const POR_MOEDA: OpcoesPiloto = { tempo: '1m', intervaloMin: 1, varrer: false, valor: 15, maxIaDia: 2, stop: 1.5, alvo: 3, protecao: 1.2, recuo: 0.6 };
 
 export async function garantirEstrategiaPadrao(): Promise<number | null> {
   const feita = await umOuNada('select 1 from configuracoes where chave = $1', ['estrategia_padrao']);

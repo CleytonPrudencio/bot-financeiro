@@ -195,6 +195,15 @@ regras de risco, a trava por estratégia, o agente de IA nas compras e as três 
   15 min; agente em etapas obrigatório; em **simulação** (com R$ 50 de saldo simulado). Operar real
   é decisão do dono.
 
+**Botões Comprar e Vender tudo** em cada estratégia: ordem do dono pelo painel (`POST
+/api/estrategias/:id/ordem`, origem `painel`). Passa pelas regras de risco, pelos limites e pelas três
+chaves; só não passa pela IA (`consultaIa(..., doDono)`), porque a decisão é dele.
+
+**Todas as moedas** (`POST /api/estrategias/todas-as-moedas`): uma estratégia de piloto para cada par
+da moeda com volume que ainda não tem estratégia, com posição própria (velas de 1 min, R$ 15 por
+ordem, stop de 1,5%, até 2 consultas à IA por moeda por dia). Nascem em simulação; o botão "Operar
+real em todas" liga as de contas reais, com confirmação.
+
 Nenhuma regra garante lucro: o stop limita a perda de cada operação, não evita que ela aconteça.
 
 ## Assistente XP (ações da B3 sem API de corretora)

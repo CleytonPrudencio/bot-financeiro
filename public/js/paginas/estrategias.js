@@ -136,6 +136,9 @@ function cartaoEstrategia(e, { resumo, ias, recarregar }) {
       h('div', {}, h('span', { class: 'suave' }, 'Por ordem'), h('strong', { class: 'mono' }, fmt(e.valor_ordem))),
     ),
     barraUso(Number(e.gasto_hoje ?? 0), Number(e.limite_diario), 'Compras hoje / limite diário'),
+    h('div', { class: 'acoes acoes-ordem' },
+      botao('Comprar', { classe: 'pequeno', nomeIcone: 'compra', onclick: () => comprarAgora(e, real, recarregar) }),
+      botao('Vender tudo', { classe: 'pequeno secundario', nomeIcone: 'venda', disabled: !(Number(e.posicao) > 0), onclick: () => venderAgora(e, real, recarregar) })),
     h('div', { class: 'cartao-acoes' },
       botaoIcone('editar', 'Editar', { onclick: () => editar(e, ias, recarregar) }),
       botaoIcone('cotacao', 'Cotação agora', {
@@ -164,6 +167,82 @@ function cartaoEstrategia(e, { resumo, ias, recarregar }) {
         : null,
     ),
   );
+}
+
+/** Resultado da ordem manual, numa frase. */
+function avisarResultado(r) {
+  const textos = {
+    executado: ['Ordem executada', 'ok'],
+    alerta: ['Aviso enviado: execute na corretora e confirme no Assistente XP', 'info'],
+    rejeitado: [`Não saiu: ${r.motivo}`, 'erro'],
+    ignorado: [`Ignorada: ${r.motivo}`, 'info'],
+    erro: [`A exchange recusou: ${r.motivo}`, 'erro'],
+  };
+  const [texto, tipo] = textos[r.situacao] ?? [r.situacao, 'info'];
+  avisar(texto, tipo);
+}
+
+function comprarAgora(e, real, recarregar) {
+  const form = h('form', {
+    class: 'form',
+    onsubmit: async (ev) => {
+      ev.preventDefault();
+      const { valor } = lerForm(form);
+      if (real && !(await confirmar('Comprar com dinheiro REAL?', `${fmt(valor)} em ${e.simbolo} na ${e.exchange}, agora, a mercado.`, { perigo: true, botao: 'Comprar' }))) return;
+      const r = await tentar(() => api('POST', `/estrategias/${e.id}/ordem`, { acao: 'comprar', valor }));
+      if (r) {
+        dlg.fechar();
+        avisarResultado(r);
+        recarregar();
+      }
+    },
+  },
+  h('p', { class: 'suave' }, 'Compra a mercado agora. Passa pelas regras de risco e pelos limites da estratégia, mas não espera a IA: a decisão é sua. O piloto cuida do stop depois.'),
+  h('div', { class: 'campos' }, campo(`Valor (${e.simbolo.split('/')[1] ?? ''})`, { name: 'valor', type: 'number', step: 'any', min: '0.01', required: true, value: e.valor_ordem }, `limite por ordem: ${fmt(e.limite_por_ordem)}`)),
+  h('div', { class: 'acoes acoes-fim' }, botao(real ? 'Comprar (real)' : 'Comprar (simulação)', { nomeIcone: 'compra', type: 'submit', classe: real ? 'perigo' : '' })));
+  const dlg = janela(`Comprar ${e.simbolo}`, { icone: 'compra', subtitulo: e.nome }, form);
+}
+
+async function venderAgora(e, real, recarregar) {
+  if (!(await confirmar(`Vender toda a posição de ${e.simbolo}?`, `${qtd(e.posicao)} ${e.simbolo.split('/')[0]} a mercado, agora${real ? ', com dinheiro REAL' : ' (simulação)'}.`, { perigo: real, botao: 'Vender tudo' }))) return;
+  const r = await tentar(() => api('POST', `/estrategias/${e.id}/ordem`, { acao: 'zerar' }));
+  if (r) {
+    avisarResultado(r);
+    recarregar();
+  }
+}
+
+/** Uma estratégia de piloto para cada moeda da conta, em simulação. */
+function todasAsMoedas(contas, recarregar) {
+  const form = h('form', {
+    class: 'form',
+    onsubmit: async (ev) => {
+      ev.preventDefault();
+      const d = lerForm(form);
+      const r = await tentar(() => api('POST', '/estrategias/todas-as-moedas', { conta_id: Number(d.conta_id), moeda: d.moeda }));
+      if (r) {
+        dlg.fechar();
+        avisar(r.criadas.length ? `Criei ${r.criadas.length} estratégias: ${r.criadas.join(', ')}` : 'Todas as moedas já tinham estratégia', 'ok');
+        recarregar();
+      }
+    },
+  },
+  h('p', { class: 'suave' }, 'Cria uma estratégia de piloto para cada par da moeda com volume (ex.: tudo em BRL), com posição própria: velas de 1 min, R$ 15 por ordem, stop de 1,5% e no máximo 2 consultas à IA por moeda por dia. Todas nascem em simulação.'),
+  h('div', { class: 'campos' },
+    escolha('Conta', 'conta_id', contas.map((c) => [c.id, `${c.nome} (${c.exchange})`]), contas[0]?.id),
+    campo('Moeda de cotação', { name: 'moeda', value: 'BRL', required: true })),
+  h('div', { class: 'acoes acoes-fim' }, botao('Criar', { nomeIcone: 'mais', type: 'submit' })));
+  const dlg = janela('Uma estratégia por moeda', { icone: 'estrategias' }, form);
+}
+
+/** Liga "operar real" em todas as estratégias de contas reais. */
+async function realEmTodas(estrategias, recarregar) {
+  const alvo = estrategias.filter((e) => !e.real && e.conta_modo === 'real');
+  if (!alvo.length) return avisar('Nenhuma estratégia de conta real em simulação', 'info');
+  if (!(await confirmar(`Operar com dinheiro REAL em ${alvo.length} estratégias?`, `${alvo.map((e) => e.simbolo).join(', ')}. Cada uma compra até o próprio valor por ordem, dentro do saldo da exchange.`, { perigo: true, botao: 'Operar real em todas' }))) return;
+  for (const e of alvo) await tentar(() => api('PATCH', `/estrategias/${e.id}`, { real: true }));
+  avisar(`Dinheiro real ligado em ${alvo.length} estratégias`, 'ok');
+  recarregar();
 }
 
 function editar(e, ias, recarregar) {
@@ -196,7 +275,9 @@ export async function paginaEstrategias({ recarregar }) {
       }));
   };
   return [
-    cabecalho('Estratégias', 'Cada estratégia recebe sinais por webhook e passa por regras de risco antes de virar ordem',
+    cabecalho('Estratégias', 'Cada estratégia recebe sinais (webhook, piloto ou os botões Comprar e Vender) e passa por regras de risco antes de virar ordem',
+      botao('Todas as moedas', { classe: 'secundario', nomeIcone: 'robo', disabled: !contas.length, onclick: () => todasAsMoedas(contas, recarregar) }),
+      botao('Operar real em todas', { classe: 'secundario', nomeIcone: 'energia', disabled: !estrategias.length, onclick: () => realEmTodas(estrategias, recarregar) }),
       botao('Nova estratégia', { nomeIcone: 'mais', disabled: !contas.length, onclick: nova })),
     !contas.length
       ? vazio('Crie uma conta primeiro', 'A estratégia precisa de uma conta (simulada ou real) numa exchange.', 'contas', h('a', { class: 'botao', href: '#/contas' }, 'Ir para Contas'))

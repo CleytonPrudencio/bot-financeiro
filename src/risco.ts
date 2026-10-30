@@ -121,9 +121,13 @@ export interface PoliticaIa {
 
 export type VotoIa = { ok: true; decisao: 'aprovar' | 'vetar'; confianca: number } | { ok: false };
 
-/** Se este sinal passa pelas IAs. "zerar" nunca passa: sair de uma posição não depende de IA. */
-export function consultaIa(acao: Sinal['acao'], p: PoliticaIa): boolean {
-  if (p.modo === 'desligado') return false;
+/**
+ * Se este sinal passa pelas IAs. "zerar" nunca passa: sair de uma posição não depende de IA. A
+ * ordem que o próprio dono manda pelo painel (`doDono`) também não: a decisão é dele, e as regras
+ * de risco e os limites continuam valendo.
+ */
+export function consultaIa(acao: Sinal['acao'], p: PoliticaIa, doDono = false): boolean {
+  if (doDono || p.modo === 'desligado') return false;
   if (acao === 'comprar') return true;
   return acao === 'vender' && p.nasVendas;
 }

@@ -220,3 +220,12 @@ describe('stop sugerido para o dono registrar na corretora (assistente)', () => 
     expect(deveAvisarStop(98, null)).toBe(false);
   });
 });
+
+describe('ordem manual do dono pelo painel', () => {
+  it('não passa pela IA, nem com IA obrigatória', () => {
+    const p = { modo: 'obrigatorio' as const, quorum: null, falha: 'reprova' as const, confiancaMin: 0.6, nasVendas: true };
+    expect(consultaIa('comprar', p)).toBe(true);
+    expect(consultaIa('comprar', p, true)).toBe(false);
+    expect(consultaIa('vender', p, true)).toBe(false);
+  });
+});
