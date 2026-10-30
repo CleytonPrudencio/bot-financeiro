@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Vela } from '../src/analise/indicadores.js';
-import { avaliarEntrada, DIA_MS, faltas, ler, tendenciaQuebrou, velasFechadas } from '../src/piloto/regras.js';
+import { avaliarEntrada, b3Aberta, DIA_MS, faltas, ler, tendenciaQuebrou, velasFechadas } from '../src/piloto/regras.js';
 
 const T0 = Date.UTC(2026, 0, 1);
 const velas = (fechamentos: number[]): Vela[] =>
@@ -82,8 +82,7 @@ describe('entrada em tendência já em curso', () => {
 
 describe('pregão da B3', () => {
   // 29/10/2026 é quinta-feira; Brasília = UTC-3
-  it('dias úteis, das 10h às 16h55 de Brasília', async () => {
-    const { b3Aberta } = await import('../src/piloto/regras.js');
+  it('dias úteis, das 10h às 16h55 de Brasília', () => {
     expect(b3Aberta(Date.UTC(2026, 9, 29, 12, 59))).toBe(false); // 9h59
     expect(b3Aberta(Date.UTC(2026, 9, 29, 13, 0))).toBe(true); // 10h
     expect(b3Aberta(Date.UTC(2026, 9, 29, 19, 54))).toBe(true); // 16h54

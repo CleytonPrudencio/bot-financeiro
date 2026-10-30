@@ -381,7 +381,7 @@ const esquemaEstrategia = z
     auto_protecao_pct: z.number().min(0.1).max(100).default(2.5),
     auto_recuo_pct: z.number().min(0.1).max(50).default(1.5),
     auto_varrer: z.boolean().default(false),
-    auto_tempo: z.enum(['5m', '15m', '1h', '4h', '1d']).default('1d'),
+    auto_tempo: z.enum(['1m', '5m', '15m', '1h', '4h', '1d']).default('1d'),
     auto_intervalo_min: z.number().int().min(1).max(1440).default(2),
     auto_volume_min: z.number().min(0).default(500_000),
     auto_max_ia_dia: z.number().int().min(0).max(100).default(6),

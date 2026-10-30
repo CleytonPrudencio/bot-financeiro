@@ -175,7 +175,7 @@ Para quem não tem TradingView: o próprio bot gera os sinais das estratégias c
 regras de risco, a trava por estratégia, o agente de IA nas compras e as três chaves do dinheiro real.
 
 - **Quando olha**: sem posição, a cada `auto_intervalo_min` (padrão 2 min), sempre na última vela
-  **fechada** do tempo escolhido (5 min, 15 min, 1 h, 4 h ou 1 dia).
+  **fechada** do tempo escolhido (1 min, 5 min, 15 min, 1 h, 4 h ou 1 dia).
 - **Onde olha**: no par da estratégia ou, com **"procurar em todos os pares da moeda"**, em todos os
   pares à vista da moeda da conta com volume de 24 h acima do mínimo (ex.: tudo em BRL na Binance, sem
   moedas estáveis). Opera o melhor, **um de cada vez**: a estratégia troca de par sozinha, só sem

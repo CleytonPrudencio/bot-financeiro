@@ -36,7 +36,7 @@ const esquema = z.object({
         cotacao: numero.positive().nullable().optional(),
         volume_financeiro: numero.min(0).nullable().optional(),
         // partialRecord: no zod 4, record com chaves de enum exige todas
-        velas: z.partialRecord(z.enum(['5m', '15m', '1h', '4h', '1d']), z.array(vela).max(600)).optional(),
+        velas: z.partialRecord(z.enum(['1m', '5m', '15m', '1h', '4h', '1d']), z.array(vela).max(600)).optional(),
       }),
     )
     .max(60)

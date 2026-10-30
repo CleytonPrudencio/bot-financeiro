@@ -53,8 +53,8 @@ export async function cotacaoPublica(exchangeId: string, simbolo: string): Promi
   return preco;
 }
 
-export type TempoVela = '5m' | '15m' | '1h' | '4h' | '1d';
-export const MS_DA_VELA: Record<TempoVela, number> = { '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000, '1d': 86_400_000 };
+export type TempoVela = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
+export const MS_DA_VELA: Record<TempoVela, number> = { '1m': 60_000, '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000, '1d': 86_400_000 };
 
 /** Velas públicas do tempo pedido (as mais recentes por último; a última ainda pode estar aberta). */
 export async function velas(exchangeId: string, simbolo: string, tempo: TempoVela, limite = 400) {

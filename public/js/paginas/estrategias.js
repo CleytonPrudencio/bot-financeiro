@@ -68,7 +68,7 @@ function formEstrategia({ e = {}, contas, ias, aoSalvar }) {
       interruptor('Só comprar na virada da tendência', { name: 'auto_exigir_virada', checked: e.auto_exigir_virada ?? true }, 'Desligado: também entra numa alta já em curso (mais compras, e mais risco de comprar perto do topo); par barrado ou que bateu no stop descansa 6 h'),
       interruptor('Procurar em todos os pares da moeda', { name: 'auto_varrer', checked: e.auto_varrer }, 'Ex.: todos os pares em BRL da Binance com volume; opera o melhor, um de cada vez (o par da estratégia troca sozinho, só sem posição)'),
       h('div', { class: 'campos' },
-        escolha('Velas que o piloto lê', 'auto_tempo', [['5m', '5 minutos'], ['15m', '15 minutos'], ['1h', '1 hora'], ['4h', '4 horas'], ['1d', '1 dia']], e.auto_tempo ?? '1d', 'sempre a última vela fechada'),
+        escolha('Velas que o piloto lê', 'auto_tempo', [['1m', '1 minuto'], ['5m', '5 minutos'], ['15m', '15 minutos'], ['1h', '1 hora'], ['4h', '4 horas'], ['1d', '1 dia']], e.auto_tempo ?? '1d', 'sempre a última vela fechada'),
         campo('Olhar o mercado a cada (min)', { name: 'auto_intervalo_min', type: 'number', min: '1', max: '1440', value: e.auto_intervalo_min ?? 2 }),
         campo('Volume mínimo do par em 24 h', { name: 'auto_volume_min', type: 'number', step: 'any', min: '0', value: e.auto_volume_min ?? 500000 }, 'na moeda de cotação; só vale na varredura'),
         campo('Consultas à IA por dia (máximo)', { name: 'auto_max_ia_dia', type: 'number', min: '0', max: '100', value: e.auto_max_ia_dia ?? 6 }, 'cada compra proposta passa pelo agente e custa créditos'),

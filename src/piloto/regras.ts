@@ -1,7 +1,7 @@
 import { ifr, macd, mediaSimples, type Vela } from '../analise/indicadores.js';
 
 // Regras do piloto automático, em funções puras (os testes cobrem cada uma). O piloto só olha velas
-// JÁ FECHADAS (de 5 min a 1 dia, conforme a estratégia): a vela aberta ainda muda e daria sinal falso.
+// JÁ FECHADAS (de 1 min a 1 dia, conforme a estratégia): a vela aberta ainda muda e daria sinal falso.
 //
 // Entrada (seguir a tendência, sem tentar pegar faca caindo), contada em velas do tempo escolhido:
 //   - tendência longa de alta: fechamento acima da média de 200 velas e média de 50 acima da de 200;
@@ -11,7 +11,7 @@ import { ifr, macd, mediaSimples, type Vela } from '../analise/indicadores.js';
 // `exigirVirada: false`, também entra numa tendência já em curso (o piloto limita o custo de IA com
 // o teto diário e deixa de fora por 6 h o par barrado ou que bateu no stop).
 //
-// Com velas curtas (5 min a 4 h), vale também o filtro diário: não compra com o preço abaixo da
+// Com velas curtas (1 min a 4 h), vale também o filtro diário: não compra com o preço abaixo da
 // média de 50 dias (tendência maior contra).
 
 export const DIA_MS = 86_400_000;

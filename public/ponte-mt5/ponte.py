@@ -29,7 +29,7 @@ LOTE_PADRAO = 100  # na B3, lote padrão de ações; abaixo disso, mercado fraci
 IDADE_MAX_S = 20
 INTERVALO_S = 1.0
 VELAS_A_CADA_S = 60
-QTD_VELAS = {"5m": 300, "15m": 300, "1h": 300, "4h": 300, "1d": 130}
+QTD_VELAS = {"1m": 300, "5m": 300, "15m": 300, "1h": 300, "4h": 300, "1d": 130}
 
 log = logging.getLogger("ponte")
 
@@ -98,7 +98,7 @@ class MetaTrader:
             raise SystemExit("o MetaTrader 5 abriu, mas sem conta logada")
         if not mt5.terminal_info().trade_allowed:
             log.warning("o botão 'Algo Trading' do MetaTrader está desligado: as ordens vão ser recusadas")
-        self.tempos = {"5m": mt5.TIMEFRAME_M5, "15m": mt5.TIMEFRAME_M15, "1h": mt5.TIMEFRAME_H1, "4h": mt5.TIMEFRAME_H4, "1d": mt5.TIMEFRAME_D1}
+        self.tempos = {"1m": mt5.TIMEFRAME_M1, "5m": mt5.TIMEFRAME_M5, "15m": mt5.TIMEFRAME_M15, "1h": mt5.TIMEFRAME_H1, "4h": mt5.TIMEFRAME_H4, "1d": mt5.TIMEFRAME_D1}
         log.info("MetaTrader conectado: %s, servidor %s", info.company, info.server)
 
     def conta(self):

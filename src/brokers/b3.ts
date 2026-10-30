@@ -15,18 +15,19 @@ const paraYahoo = (simbolo: string) => `${simbolo.split('/')[0]!.toUpperCase()}.
 
 // O Yahoo não tem vela de 4 h; as outras, com o maior histórico que ele dá para cada tempo.
 const INTERVALO: Partial<Record<TempoVela, { intervalo: string; periodo: string }>> = {
+  '1m': { intervalo: '1m', periodo: '7d' },
   '5m': { intervalo: '5m', periodo: '30d' },
   '15m': { intervalo: '15m', periodo: '60d' },
   '1h': { intervalo: '60m', periodo: '730d' },
   '1d': { intervalo: '1d', periodo: '2y' },
 };
-const VALIDADE_MS: Record<string, number> = { '5m': 60_000, '15m': 120_000, '1h': 300_000, '1d': 1_800_000, cotacao: 60_000 };
+const VALIDADE_MS: Record<string, number> = { '1m': 30_000, '5m': 60_000, '15m': 120_000, '1h': 300_000, '1d': 1_800_000, cotacao: 60_000 };
 
 const cache = new Map<string, { ate: number; dado: Promise<Grafico> }>();
 
 async function buscar(simbolo: string, tempo: TempoVela): Promise<Grafico> {
   const p = INTERVALO[tempo];
-  if (!p) throw new Error(`velas de ${tempo} não existem para ações da B3 (use 5m, 15m, 1h ou 1d)`);
+  if (!p) throw new Error(`velas de ${tempo} não existem para ações da B3 (use 1m, 5m, 15m, 1h ou 1d)`);
   const chave = `${simbolo}|${tempo}`;
   const atual = cache.get(chave);
   if (atual && atual.ate > Date.now()) return atual.dado;

@@ -65,7 +65,7 @@ export interface Estrategia {
   auto_recuo_pct: number;
   auto_ultima_vela: number | null;
   auto_varrer: boolean;
-  auto_tempo: '5m' | '15m' | '1h' | '4h' | '1d';
+  auto_tempo: '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
   auto_intervalo_min: number;
   auto_volume_min: number;
   auto_max_ia_dia: number;
