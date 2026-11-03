@@ -93,6 +93,17 @@ export function tendenciaQuebrou(fechadas: Vela[]): string | null {
   return ultimo < media50 ? 'tendência quebrou: fechamento abaixo da média de 50 dias' : null;
 }
 
+/**
+ * Ação da B3 só se compra inteira: com `valor` reais, cabe pelo menos 1 ação a `preco`? Null se cabe;
+ * senão, o motivo. Sem preço conhecido, deixa passar (a ordem confere de novo).
+ */
+export function cabeUmaAcao(preco: number | null | undefined, valor: number | null): string | null {
+  if (!preco || !(preco > 0)) return null;
+  if (valor === null || valor <= 0) return 'sem saldo livre para comprar';
+  if (preco <= valor) return null;
+  return `1 ação custa R$ ${preco.toFixed(2)}, mais que os R$ ${valor.toFixed(2)} da compra`;
+}
+
 /** Corte prévio pelo Kronos, para não gastar IA à toa: abaixo de 50% de chance de alta, não entra. */
 export const KRONOS_MIN_ALTA = 0.5;
 

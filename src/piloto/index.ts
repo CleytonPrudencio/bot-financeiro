@@ -9,7 +9,7 @@ import { moedas } from '../brokers/tipos.js';
 import { corretoraReal, processarSinalDa, type Conta, type Estrategia, type Resultado } from '../motor.js';
 import { kronosLigado, preverKronos } from '../previsao/kronos.js';
 import { conferirSaida, deveAvisarStop, stopSugerido } from '../risco.js';
-import { avaliarEntrada, avaliarRepique, b3Aberta, DIA_MS, filtroDiario, KRONOS_MIN_ALTA, tendenciaQuebrou, velasFechadas } from './regras.js';
+import { avaliarEntrada, avaliarRepique, b3Aberta, cabeUmaAcao, DIA_MS, filtroDiario, KRONOS_MIN_ALTA, tendenciaQuebrou, velasFechadas } from './regras.js';
 
 // Piloto automático: o bot gera os próprios sinais das estratégias com "piloto ligado" e manda pelo
 // mesmo caminho do webhook (processarSinalDa). Então vale tudo: regras de risco, trava por
@@ -171,6 +171,10 @@ async function cuidar(e: EstrategiaPiloto, agora: number): Promise<void> {
   }
 
   const barrados = await paresBarrados(e.id);
+  // na B3 só se compra ação inteira: o que custa mais que a compra fica de fora antes da IA
+  const acaoInteira = ehB3(e.exchange);
+  // sem resposta do saldo (ponte parada), usa o valor da estratégia: a compra confere de novo
+  const valorMax = acaoInteira ? await valorDaCompra(e).catch(() => e.valor_ordem) : null;
   const resumo: string[] = [];
   const candidatos: Candidato[] = [];
   const olhados: Olhado[] = [];
@@ -199,6 +203,13 @@ async function cuidar(e: EstrategiaPiloto, agora: number): Promise<void> {
       const contra = filtroDiario(velasFechadas(await diariasComCache(e.exchange, simbolo), agora));
       if (contra) {
         anotar(simbolo, `virou, mas ${contra}`, false, fechamento);
+        continue;
+      }
+    }
+    if (acaoInteira) {
+      const caro = cabeUmaAcao(fechamento, valorMax);
+      if (caro) {
+        anotar(simbolo, `entraria, mas ${caro}`, false, fechamento);
         continue;
       }
     }

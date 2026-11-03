@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Vela } from '../src/analise/indicadores.js';
-import { avaliarEntrada, avaliarRepique, b3Aberta, DIA_MS, faltas, ler, tendenciaQuebrou, velasFechadas } from '../src/piloto/regras.js';
+import { avaliarEntrada, avaliarRepique, b3Aberta, cabeUmaAcao, DIA_MS, faltas, ler, tendenciaQuebrou, velasFechadas } from '../src/piloto/regras.js';
 
 const T0 = Date.UTC(2026, 0, 1);
 const velas = (fechamentos: number[]): Vela[] =>
@@ -107,5 +107,16 @@ describe('estilo repique', () => {
     expect(avaliarRepique(velasDe([...lado, 100.5])).motivo).toContain('não está vendido demais');
     const tombo = Array.from({ length: 15 }, (_, i) => 100 - (i + 1) * 0.6); // ~9% de queda
     expect(avaliarRepique(velasDe([...lado, ...tombo, tombo[14]! + 0.3])).motivo).toContain('queda forte demais');
+  });
+});
+
+describe('ação inteira na B3', () => {
+  it('só entra se o valor compra pelo menos 1 ação', () => {
+    expect(cabeUmaAcao(50.74, 90)).toBeNull();
+    expect(cabeUmaAcao(90, 90)).toBeNull();
+    expect(cabeUmaAcao(470.37, 90)).toContain('1 ação custa R$ 470.37');
+    expect(cabeUmaAcao(50.74, 50)).toContain('mais que os R$ 50.00');
+    expect(cabeUmaAcao(10, null)).toBe('sem saldo livre para comprar');
+    expect(cabeUmaAcao(undefined, 90)).toBeNull();
   });
 });
