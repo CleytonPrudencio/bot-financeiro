@@ -47,6 +47,15 @@ class TestePonte(unittest.TestCase):
         self.assertIn("lado", ponte.conferir_ordem({**ok, "lado": "x"}, 200))
         self.assertIn("menor que 1", ponte.conferir_ordem({**ok, "quantidade": 0}, 200))
 
+    def test_arquivo_env(self):
+        with tempfile.TemporaryDirectory() as d:
+            pasta = pathlib.Path(d)
+            self.assertEqual(ponte.arquivo_env(pasta).name, "ponte.env")
+            (pasta / "ponte.env.txt").write_text("BOT_URL=x", encoding="utf-8")
+            self.assertEqual(ponte.arquivo_env(pasta).name, "ponte.env.txt")
+            (pasta / "ponte.env").write_text("BOT_URL=y", encoding="utf-8")
+            self.assertEqual(ponte.arquivo_env(pasta).name, "ponte.env")
+
     def test_vela_e_env(self):
         v = {"time": 1700000000, "open": 1, "high": 2, "low": 0.5, "close": 1.5, "real_volume": 0, "tick_volume": 7}
         self.assertEqual(ponte.vela_para_lista(v), [1700000000000, 1.0, 2.0, 0.5, 1.5, 7.0])

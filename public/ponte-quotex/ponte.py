@@ -104,6 +104,15 @@ def resultado_da_quotex(win, esperou_s):
     return None
 
 
+def arquivo_env(pasta):
+    """O ponte.env da pasta. O Bloco de Notas costuma salvar como "ponte.env.txt" (e o Windows esconde
+    o .txt): vale também."""
+    for nome in ("ponte.env", "ponte.env.txt"):
+        if (pasta / nome).exists():
+            return pasta / nome
+    return pasta / "ponte.env"
+
+
 def ler_env(arquivo):
     """Lê um arquivo CHAVE=valor (linhas com # são comentário)."""
     valores = {}
@@ -161,7 +170,7 @@ async def apostar(cliente, cmd):
 
 async def principal():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
-    env = {**ler_env(Path(__file__).with_name("ponte.env")), **os.environ}
+    env = {**ler_env(arquivo_env(Path(__file__).parent)), **os.environ}
     url, token = env.get("BOT_URL"), env.get("PONTE_TOKEN")
     email, senha = env.get("QUOTEX_EMAIL"), env.get("QUOTEX_SENHA")
     if not url or not token:

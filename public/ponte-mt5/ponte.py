@@ -96,6 +96,15 @@ def vela_para_lista(v):
     return [int(v["time"]) * 1000, float(v["open"]), float(v["high"]), float(v["low"]), float(v["close"]), float(v["real_volume"] or v["tick_volume"])]
 
 
+def arquivo_env(pasta):
+    """O ponte.env da pasta. O Bloco de Notas costuma salvar como "ponte.env.txt" (e o Windows esconde
+    o .txt): vale também."""
+    for nome in ("ponte.env", "ponte.env.txt"):
+        if (pasta / nome).exists():
+            return pasta / nome
+    return pasta / "ponte.env"
+
+
 def ler_env(arquivo):
     """Lê um arquivo CHAVE=valor (linhas com # são comentário)."""
     valores = {}
@@ -239,7 +248,7 @@ def sincronizar(url, token, corpo):
 
 def principal():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
-    env = {**ler_env(Path(__file__).with_name("ponte.env")), **os.environ}
+    env = {**ler_env(arquivo_env(Path(__file__).parent)), **os.environ}
     url, token = env.get("BOT_URL"), env.get("PONTE_TOKEN")
     if not url or not token:
         raise SystemExit("defina BOT_URL e PONTE_TOKEN (no ponte.env ao lado deste arquivo)")

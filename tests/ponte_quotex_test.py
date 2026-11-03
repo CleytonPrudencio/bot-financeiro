@@ -47,6 +47,15 @@ class TestePonteQuotex(unittest.TestCase):
         # a pyquotex devolve "loss" também quando cansa de esperar: aí não dá para saber
         self.assertIsNone(ponte.resultado_da_quotex("loss", 300))
 
+    def test_arquivo_env(self):
+        with tempfile.TemporaryDirectory() as d:
+            pasta = pathlib.Path(d)
+            self.assertEqual(ponte.arquivo_env(pasta).name, "ponte.env")
+            (pasta / "ponte.env.txt").write_text("BOT_URL=x", encoding="utf-8")
+            self.assertEqual(ponte.arquivo_env(pasta).name, "ponte.env.txt")
+            (pasta / "ponte.env").write_text("BOT_URL=y", encoding="utf-8")
+            self.assertEqual(ponte.arquivo_env(pasta).name, "ponte.env")
+
     def test_env(self):
         with tempfile.TemporaryDirectory() as d:
             arq = pathlib.Path(d) / "ponte.env"
