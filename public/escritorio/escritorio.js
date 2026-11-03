@@ -1035,10 +1035,15 @@ export function montarEscritorio(raiz, opcoes = {}) {
 
   let fundo = null;
   function redimensionar() {
-    const largura = palco.clientWidth || 800;
+    // o escritório inteiro cabe na tela: com muitas fileiras de mesas, encolhe pela altura
+    const cheia = document.fullscreenElement === palco;
+    const disponivel = cheia ? window.innerWidth : palco.clientWidth || 800;
+    const alturaMax = cheia ? window.innerHeight : Math.max(360, window.innerHeight - 150);
+    const largura = Math.floor(Math.min(disponivel, (alturaMax * D.LARGURA) / D.ALTURA));
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.round(largura * dpr);
     canvas.height = Math.round((largura * dpr * D.ALTURA) / D.LARGURA);
+    canvas.style.width = `${largura}px`;
     canvas.style.height = `${(largura * D.ALTURA) / D.LARGURA}px`;
     const k = canvas.width / D.LARGURA;
     fundo = document.createElement('canvas');
@@ -1050,6 +1055,9 @@ export function montarEscritorio(raiz, opcoes = {}) {
   }
   const observador = new ResizeObserver(() => redimensionar());
   observador.observe(palco);
+  // a altura da janela também manda no tamanho (e a tela cheia usa a tela toda)
+  window.addEventListener('resize', redimensionar);
+  document.addEventListener('fullscreenchange', redimensionar);
   redimensionar();
 
   // ---------------------------------------------------------------- laço
@@ -1202,6 +1210,8 @@ export function montarEscritorio(raiz, opcoes = {}) {
     parar() {
       cancelAnimationFrame(rafId);
       observador.disconnect();
+      window.removeEventListener('resize', redimensionar);
+      document.removeEventListener('fullscreenchange', redimensionar);
       clearInterval(intervaloAoVivo);
     },
     // para testes e demonstração

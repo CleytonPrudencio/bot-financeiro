@@ -801,10 +801,11 @@ body.na-entrada { overflow: hidden; }
 /* ------------------------------------------------------------------ escritório virtual */
 
 .escritorio { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: start; }
-.escritorio-palco { position: relative; border-radius: var(--raio); overflow: hidden; border: 1px solid var(--borda-forte); background: #1d2433; box-shadow: var(--sombra-alta); }
+/* o palco ocupa a largura; o canvas encolhe para caber na altura da tela e fica no meio */
+.escritorio-palco { position: relative; }
 .escritorio-palco:fullscreen { display: flex; align-items: center; justify-content: center; background: #000; border: 0; border-radius: 0; }
-.escritorio-canvas { display: block; width: 100%; cursor: pointer; }
-.escritorio-palco:fullscreen .escritorio-canvas { width: min(100vw, calc(100vh * 16 / 9)); height: auto !important; }
+.escritorio-canvas { display: block; width: 100%; max-width: 100%; margin: 0 auto; cursor: pointer; border-radius: var(--raio); border: 1px solid var(--borda-forte); background: #1d2433; box-shadow: var(--sombra-alta); }
+.escritorio-palco:fullscreen .escritorio-canvas { max-width: none; border: 0; border-radius: 0; }
 .escritorio-lado { display: grid; gap: 12px; max-height: calc(100vh - 150px); overflow-y: auto; padding-right: 4px; }
 .escritorio-lado h2 { margin: 6px 0 0; }
 .escritorio-lado .rotulo, .escritorio .rotulo { color: var(--suave); font-size: 12.5px; }
