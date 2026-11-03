@@ -834,6 +834,23 @@ body.na-entrada { overflow: hidden; }
 .escritorio-vivo .escritorio-registro { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); align-items: start; }
 .escritorio-vivo .escritorio-registro:empty::before { content: 'Nenhuma decisão ainda: elas aparecem aqui assim que um sinal chegar.'; color: var(--suave); font-size: 13px; }
 .escritorio-vivo .quadro-robos-lista { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); column-gap: 14px; align-items: start; }
+/* escritório: janela de detalhes do robô */
+.detalhe-robo { display: grid; gap: 10px; }
+.detalhe-robo h3 { margin: 8px 0 0; font-size: 14px; }
+.detalhe-robo p { margin: 0; }
+.detalhe-robo-cor { color: #fff; font-weight: 700; font-size: 15px; }
+.detalhe-fichas { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.detalhe-ficha { display: grid; gap: 2px; padding: 9px 11px; border-radius: 10px; background: var(--painel-2); border: 1px solid var(--borda); }
+.detalhe-grafico { display: block; width: 100%; height: 220px; border-radius: 10px; }
+.detalhe-legenda span { margin-right: 10px; }
+.legenda-preco { color: var(--ok); }
+.legenda-m9 { color: #ffd166; }
+.legenda-m26 { color: #7cc4ff; }
+.legenda-entrada { color: #e8c35a; }
+.detalhe-decisoes { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.detalhe-decisoes li { padding: 8px 10px; border-radius: 10px; background: var(--painel-2); border-left: 4px solid var(--borda-forte); display: grid; gap: 3px; }
+.detalhe-decisoes li.aprovado { border-left-color: var(--ok); }
+.detalhe-decisoes li.reprovado { border-left-color: var(--perigo); }
 /* escritório ao vivo: quadro compacto, uma linha por robô */
 .quadro-robos { background: var(--painel); border: 1px solid var(--borda); border-radius: 12px; padding: 10px; display: grid; gap: 8px; }
 .quadro-robos-lista { display: grid; gap: 2px; }

@@ -763,6 +763,12 @@ export function montarEscritorio(raiz, opcoes = {}) {
     h('button', { class: `pequeno ${v === 1 ? '' : 'secundario'}`, onclick: () => definirVelocidade(v) }, `${v}x`),
   );
   const botaoTela = h('button', { class: 'pequeno secundario', onclick: () => telaCheia() }, 'Tela cheia');
+  // zoom: + e − pelo centro da tela, "Ver tudo" volta ao salão inteiro
+  const botoesZoom = [
+    h('button', { class: 'pequeno secundario', type: 'button', title: 'Afastar', 'aria-label': 'Afastar', onclick: () => zoomEm(null, 1 / 1.6) }, '−'),
+    h('button', { class: 'pequeno secundario', type: 'button', title: 'Aproximar', 'aria-label': 'Aproximar', onclick: () => zoomEm(null, 1.6) }, '+'),
+    h('button', { class: 'pequeno secundario', type: 'button', onclick: () => verTudo() }, 'Ver tudo'),
+  ];
   const listaRegistro = h('ol', { class: 'escritorio-registro', 'aria-live': 'polite' });
   // ao vivo, as decisões ficam embaixo na largura toda: mostra as 12 mais novas e o resto sob pedido
   const DECISOES_VISIVEIS = 12;
@@ -829,7 +835,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
   const lateral = h(
     'aside',
     { class: 'escritorio-lado' },
-    h('div', { class: 'acoes' }, botaoPausa, ...botoesVel, botaoTela),
+    h('div', { class: 'acoes' }, botaoPausa, ...botoesVel, ...botoesZoom, botaoTela),
     aoVivo
       ? h('p', { class: 'rotulo' }, 'Cada robô é uma estratégia sua (ou uma moeda que o piloto está olhando), com o preço real. Toque numa linha para ver o motivo. Cada sinal vira uma reunião com o chefe.')
       : h('p', { class: 'rotulo' }, 'Dados fictícios: nenhuma ordem de verdade sai desta tela. Escolha quem trabalha hoje; quem fica de folga vai para a sala de descanso. Clique num robô para ver os detalhes.'),
@@ -848,8 +854,8 @@ export function montarEscritorio(raiz, opcoes = {}) {
   const vivo = aoVivo
     ? h('div', { class: 'escritorio escritorio-vivo' },
         h('div', { class: 'escritorio-barra' },
-          h('p', { class: 'rotulo' }, 'Cada robô é uma estratégia sua (ou um par que o piloto está olhando), com o preço real. Cada sinal vira uma reunião com o chefe.'),
-          h('div', { class: 'acoes' }, botaoPausa, ...botoesVel, botaoTela)),
+          h('p', { class: 'rotulo' }, 'Cada robô é uma estratégia sua (ou um par que o piloto está olhando), com o preço real. Clique num robô para ver tudo dele; Ctrl + roda do mouse (ou pinça) dá zoom, e arrastando você anda pelo salão.'),
+          h('div', { class: 'acoes' }, botaoPausa, ...botoesVel, ...botoesZoom, botaoTela)),
         palco,
         h('section', { class: 'escritorio-decisoes' }, h('h2', {}, 'Decisões'), h('p', { class: 'rotulo' }, 'Aprovadas e recusadas, da mais nova para a mais antiga.'), listaRegistro, h('div', { class: 'acoes escritorio-decisoes-mais' }, botaoMaisDecisoes)),
         quadroRobos)
@@ -896,7 +902,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
     listaQuadro.replaceChildren(...linhas.map(({ r, e, c, motivo, texto, tipo, temPosicao }) => {
       const nome = r.ativo.olheiro ? r.ativo.simbolo.split('/')[0] : e.nome.replace(/^Piloto /, '');
       const v = r.ativo.variacaoDia * 100;
-      const linha = h('button', { class: `linha-robo ${r === selecionado ? 'aberta' : ''}`, type: 'button', onclick: () => selecionar(r), title: motivo ?? '' },
+      const linha = h('button', { class: `linha-robo ${r === selecionado ? 'aberta' : ''}`, type: 'button', onclick: () => abrirRobo(r), title: motivo ?? '' },
         h('i', {}),
         h('span', { class: 'linha-robo-nome' }, nome, r.ativo.olheiro ? h('small', {}, ' olheiro') : null),
         h('span', { class: 'mono linha-robo-preco' }, r.ativo.semCotacao ? '—' : formatarPreco(r.ativo, r.ativo.preco)),
@@ -1017,11 +1023,63 @@ export function montarEscritorio(raiz, opcoes = {}) {
     );
   }
 
-  // clique no canvas: seleciona o robô mais perto
-  canvas.addEventListener('click', (ev) => {
+  // ---------------------------------------------------------------- câmera: zoom e arrastar
+
+  // `cam` é o que está na tela; `alvo`, para onde ela vai (a câmera desliza até lá)
+  const cam = { z: 1, x: 0, y: 0 };
+  const alvo = { z: 1, x: 0, y: 0 };
+  const ZOOM_MAX = 4;
+  function limitar(c) {
+    c.z = Math.max(1, Math.min(ZOOM_MAX, c.z));
+    const meiaL = D.LARGURA / (2 * c.z);
+    const meiaA = D.ALTURA / (2 * c.z);
+    c.x = Math.max(D.ESQ + meiaL, Math.min(D.ESQ + D.LARGURA - meiaL, c.x));
+    c.y = Math.max(meiaA, Math.min(D.ALTURA - meiaA, c.y));
+  }
+  function verTudo() {
+    Object.assign(alvo, { z: 1, x: D.ESQ + D.LARGURA / 2, y: D.ALTURA / 2 });
+  }
+  verTudo();
+  Object.assign(cam, alvo);
+  function voarPara(x, y, z) {
+    Object.assign(alvo, { x, y, z });
+    limitar(alvo);
+  }
+  /** Transformação do salão para os pixels do canvas, com o zoom de agora. */
+  function vista() {
+    const k = canvas.width / D.LARGURA;
+    const S = k * cam.z;
+    return { k, S, tx: canvas.width / 2 - cam.x * S, ty: canvas.height / 2 - cam.y * S };
+  }
+  function pixelDoCanvas(clientX, clientY) {
     const ret = canvas.getBoundingClientRect();
-    const x = ((ev.clientX - ret.left) / ret.width) * D.LARGURA + D.ESQ;
-    const y = ((ev.clientY - ret.top) / ret.height) * D.ALTURA;
+    return { px: ((clientX - ret.left) / ret.width) * canvas.width, py: ((clientY - ret.top) / ret.height) * canvas.height };
+  }
+  function paraSalao(clientX, clientY) {
+    const { px, py } = pixelDoCanvas(clientX, clientY);
+    const v = vista();
+    return { x: (px - v.tx) / v.S, y: (py - v.ty) / v.S };
+  }
+  /** Zoom mantendo parado o ponto debaixo do cursor (ou o centro, sem evento). */
+  function zoomEm(ev, fator) {
+    const k = canvas.width / D.LARGURA;
+    const ponto = ev ? paraSalao(ev.clientX, ev.clientY) : { x: alvo.x, y: alvo.y };
+    const { px, py } = ev ? pixelDoCanvas(ev.clientX, ev.clientY) : { px: canvas.width / 2, py: canvas.height / 2 };
+    const z = Math.max(1, Math.min(ZOOM_MAX, alvo.z * fator));
+    alvo.z = z;
+    alvo.x = ponto.x - (px - canvas.width / 2) / (k * z);
+    alvo.y = ponto.y - (py - canvas.height / 2) / (k * z);
+    limitar(alvo);
+  }
+  function passoCamera(dtReal) {
+    const f = reduzido ? 1 : 1 - Math.exp(-dtReal * 9);
+    for (const c of ['z', 'x', 'y']) cam[c] += (alvo[c] - cam[c]) * f;
+    if (Math.abs(alvo.z - cam.z) < 0.001 && Math.abs(alvo.x - cam.x) < 0.05 && Math.abs(alvo.y - cam.y) < 0.05) Object.assign(cam, alvo);
+  }
+  const cameraParada = () => cam.z === alvo.z && cam.x === alvo.x && cam.y === alvo.y;
+
+  /** O robô debaixo de um ponto do salão (o mais perto da cabeça, até 60 de distância). */
+  function roboEm(x, y) {
     let melhor = null;
     let menor = 60;
     for (const r of robos) {
@@ -1031,8 +1089,262 @@ export function montarEscritorio(raiz, opcoes = {}) {
         melhor = r;
       }
     }
-    if (melhor) selecionar(melhor);
+    return melhor;
+  }
+
+  let emCima = null; // robô debaixo do mouse: ganha o anel de destaque
+  const toques = new Map();
+  let arraste = null;
+  let pinca = null;
+  canvas.style.touchAction = 'none';
+  canvas.addEventListener('pointerdown', (ev) => {
+    canvas.setPointerCapture?.(ev.pointerId);
+    toques.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (toques.size === 2) {
+      const [a, b] = [...toques.values()];
+      pinca = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, z: alvo.z };
+      arraste = null;
+    } else if (toques.size === 1) {
+      arraste = { x: ev.clientX, y: ev.clientY, camX: alvo.x, camY: alvo.y, moveu: false };
+    }
   });
+  canvas.addEventListener('pointermove', (ev) => {
+    if (toques.has(ev.pointerId)) toques.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (pinca && toques.size === 2) {
+      const [a, b] = [...toques.values()];
+      const meio = { clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 };
+      zoomEm(meio, (pinca.z * (Math.hypot(a.x - b.x, a.y - b.y) / pinca.d)) / alvo.z);
+      return;
+    }
+    if (arraste) {
+      const ret = canvas.getBoundingClientRect();
+      const dx = ev.clientX - arraste.x;
+      const dy = ev.clientY - arraste.y;
+      if (Math.hypot(dx, dy) > 5) arraste.moveu = true;
+      if (arraste.moveu && alvo.z > 1) {
+        const porPx = D.LARGURA / (ret.width * alvo.z);
+        alvo.x = arraste.camX - dx * porPx;
+        alvo.y = arraste.camY - dy * porPx;
+        limitar(alvo);
+        Object.assign(cam, alvo); // arrastar segue o dedo, sem atraso
+        canvas.style.cursor = 'grabbing';
+      }
+      return;
+    }
+    const p = paraSalao(ev.clientX, ev.clientY);
+    emCima = roboEm(p.x, p.y);
+    canvas.style.cursor = emCima ? 'pointer' : alvo.z > 1 ? 'grab' : 'default';
+  });
+  const soltar = (ev) => {
+    toques.delete(ev.pointerId);
+    if (toques.size < 2) pinca = null;
+    if (arraste && !arraste.moveu && ev.type === 'pointerup') {
+      const p = paraSalao(ev.clientX, ev.clientY);
+      const r = roboEm(p.x, p.y);
+      if (r) abrirRobo(r);
+    }
+    arraste = null;
+    canvas.style.cursor = emCima ? 'pointer' : alvo.z > 1 ? 'grab' : 'default';
+  };
+  canvas.addEventListener('pointerup', soltar);
+  canvas.addEventListener('pointercancel', soltar);
+  canvas.addEventListener('pointerleave', () => {
+    if (!arraste) emCima = null;
+  });
+  // roda do mouse: com Ctrl (ou a pinça do touchpad) dá zoom; já com zoom, a roda também afasta e aproxima
+  canvas.addEventListener('wheel', (ev) => {
+    if (!ev.ctrlKey && !ev.metaKey && alvo.z <= 1) return; // sem zoom, a roda rola a página
+    ev.preventDefault();
+    zoomEm(ev, Math.exp(-ev.deltaY * (ev.ctrlKey ? 0.01 : 0.0015)));
+  }, { passive: false });
+  canvas.addEventListener('dblclick', (ev) => {
+    ev.preventDefault();
+    if (alvo.z >= ZOOM_MAX * 0.9) verTudo();
+    else zoomEm(ev, 2);
+  });
+
+  /** Clique num robô: a câmera vai até ele e abre a janela com tudo dele. */
+  function abrirRobo(r) {
+    if (selecionado !== r) selecionar(r);
+    voarPara(r.x, r.y - r.lift - 50 * D.escalaEm(r.y), Math.max(alvo.z, 2.4));
+    abrirDetalhe(r);
+  }
+
+  // ---------------------------------------------------------------- janela de detalhes do robô
+
+  let detalhe = null; // { r, dialogo, corpo }
+  function abrirDetalhe(r) {
+    detalhe?.dialogo.close();
+    const corpo = h('div', { class: 'janela-corpo detalhe-robo' });
+    const titulo = h('h2', {});
+    const subtitulo = h('p', { class: 'suave' });
+    const dialogo = h('dialog', { class: 'janela janela-grande', 'aria-label': 'Detalhes do robô' },
+      h('header', { class: 'janela-topo' },
+        h('span', { class: 'janela-icone detalhe-robo-cor' }, r.simboloPeito ?? '●'),
+        h('div', {}, titulo, subtitulo),
+        h('button', { class: 'botao-icone', type: 'button', 'aria-label': 'Fechar', onclick: () => dialogo.close() }, '✕')),
+      corpo);
+    dialogo.querySelector('.detalhe-robo-cor').style.background = r.cor;
+    dialogo.addEventListener('click', (ev) => {
+      if (ev.target === dialogo) dialogo.close();
+    });
+    dialogo.addEventListener('close', () => {
+      dialogo.remove();
+      if (detalhe?.dialogo === dialogo) detalhe = null;
+    });
+    document.body.append(dialogo);
+    dialogo.showModal();
+    detalhe = { r, dialogo, corpo, titulo, subtitulo, assinatura: '' };
+    desenharDetalhe();
+  }
+
+  const ESTADO_TEXTO = {
+    trabalhando: 'analisando o mercado na mesa',
+    dormindo: 'esperando o mercado abrir',
+    indo: 'indo levar um sinal ao chefe',
+    fila: 'na fila do chefe',
+    reuniao: 'em reunião com o chefe',
+    voltando: 'voltando para a mesa',
+    indo_mesa: 'indo para a mesa',
+    indo_folga: 'indo descansar',
+    folga: 'de folga (estratégia parada)',
+  };
+
+  function desenharDetalhe() {
+    if (!detalhe) return;
+    const { r } = detalhe;
+    const a = r.ativo;
+    const e = a.estrategia ?? {};
+    const c = r.carteira;
+    const entradas = registro.filter((x) => x.robo === r).slice(0, 8);
+    const motivo = aoVivo ? motivoDoRobo(a) : null;
+    // só refaz quando algo visível mudou (o gráfico é desenhado de novo junto)
+    const assinatura = JSON.stringify([a.preco, a.historico.length, a.variacaoDia, c.quantidade, c.precoEntrada, r.estado, motivo, entradas.length, e.ativa, e.operando_real]);
+    if (assinatura === detalhe.assinatura) return;
+    detalhe.assinatura = assinatura;
+
+    detalhe.titulo.textContent = aoVivo ? (a.olheiro ? `Olheiro ${a.simbolo}` : e.nome) : `${r.nome} · ${a.nome}`;
+    detalhe.subtitulo.textContent = aoVivo
+      ? `${a.simbolo} · ${e.exchange ?? a.mercado ?? ''}${e.conta ? ` · ${e.conta}` : ''}`
+      : `${a.simbolo} · ${a.mercado}`;
+    const v = a.variacaoDia * 100;
+    const temPosicao = !a.olheiro && c.quantidade > 0;
+    const resultado = temPosicao && c.precoEntrada ? (a.preco / c.precoEntrada - 1) * 100 : null;
+    const ficha = (rotulo, valor, classe = '') => h('div', { class: 'detalhe-ficha' }, h('span', { class: 'rotulo' }, rotulo), h('strong', { class: `mono ${classe}` }, valor));
+    const selos = [];
+    if (aoVivo) {
+      selos.push(h('span', { class: `selo-mini ${e.ativa ? 'ok' : ''}` }, e.ativa ? 'ativa' : 'parada'));
+      selos.push(h('span', { class: `selo-mini ${e.operando_real ? 'perigo' : 'alerta'}` }, e.operando_real ? 'dinheiro REAL' : 'simulação'));
+      if (a.olheiro) selos.push(h('span', { class: 'selo-mini' }, 'olheiro: o piloto está de olho'));
+      if (e.auto_ligado) selos.push(h('span', { class: 'selo-mini' }, `piloto ${e.auto_estilo === 'repique' ? 'repique' : 'tendência'}${e.auto_tempo ? ` · velas de ${e.auto_tempo}` : ''}`));
+      if (e.auto_ligado && e.auto_stop_pct) selos.push(h('span', { class: 'selo-mini' }, `stop -${Number(e.auto_stop_pct).toLocaleString('pt-BR')}% · alvo +${Number(e.auto_alvo_pct).toLocaleString('pt-BR')}%`));
+    }
+    const grafico = h('canvas', { class: 'detalhe-grafico', role: 'img', 'aria-label': `Gráfico de ${a.simbolo}` });
+    const linhasDecisao = entradas.length
+      ? h('ol', { class: 'detalhe-decisoes' }, entradas.map((x) => {
+          const aprovado = x.decisao?.aprovado;
+          return h('li', { class: aprovado ? 'aprovado' : 'reprovado' },
+            h('div', { class: 'escritorio-cartao-topo' },
+              h('strong', {}, `${x.proposta.lado === 'compra' ? 'Compra' : 'Venda'} ${x.proposta.simboloDoSinal ?? a.simbolo}`),
+              h('span', { class: `selo-mini ${aprovado ? 'ok' : 'perigo'}` }, aprovado ? 'aprovada' : 'recusada')),
+            h('div', { class: 'rotulo' }, `${x.hora} · ${x.decisao?.motivo ?? x.proposta.motivo ?? ''}`));
+        }))
+      : h('p', { class: 'rotulo' }, 'Nenhuma decisão deste robô desde que a tela abriu.');
+    detalhe.corpo.replaceChildren(
+      h('div', { class: 'detalhe-fichas' },
+        ficha('Preço agora', a.semCotacao ? '—' : formatarPreco(a, a.preco)),
+        ficha('Hoje', a.semCotacao ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`, v >= 0 ? 'positivo' : 'negativo'),
+        aoVivo && !a.olheiro ? ficha('Por ordem', Number(e.valor_ordem ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })) : null,
+        ficha('Posição', temPosicao ? `${Number(c.quantidade).toLocaleString('pt-BR', { maximumFractionDigits: 8 })} desde ${formatarPreco(a, c.precoEntrada)}` : 'sem posição'),
+        resultado !== null ? ficha('Resultado da posição', `${resultado >= 0 ? '+' : ''}${resultado.toFixed(2)}%`, resultado >= 0 ? 'positivo' : 'negativo') : null),
+      selos.length ? h('div', { class: 'fichas' }, selos) : null,
+      h('h3', {}, 'O que está fazendo'),
+      h('p', {}, `Agora: ${ESTADO_TEXTO[r.estado] ?? r.estado}.`),
+      aoVivo ? h('p', { class: 'suave' }, e.auto_ligado ? `Piloto: ${motivo ?? 'aguardando a primeira passada'}` : 'Piloto desligado: só age com sinal do webhook ou pelos botões em Estratégias.') : null,
+      h('h3', {}, aoVivo ? 'Mercado (velas diárias)' : 'Mercado'),
+      grafico,
+      h('p', { class: 'rotulo detalhe-legenda' }, h('span', { class: 'legenda-preco' }, '— preço'), ' ', h('span', { class: 'legenda-m9' }, '— média 9'), ' ', h('span', { class: 'legenda-m26' }, '— média 26'), temPosicao ? h('span', { class: 'legenda-entrada' }, ' - - preço de entrada') : null),
+      h('h3', {}, 'Últimas decisões'),
+      linhasDecisao,
+      aoVivo ? h('div', { class: 'acoes acoes-fim' },
+        h('button', { class: 'botao pequeno secundario', type: 'button', onclick: () => voarPara(r.x, r.y - r.lift - 50 * D.escalaEm(r.y), 3) }, 'Ver de perto'),
+        h('button', { class: 'botao pequeno', type: 'button', onclick: () => { detalhe?.dialogo.close(); location.hash = '#/estrategias'; } }, 'Comprar ou vender em Estratégias')) : null,
+    );
+    requestAnimationFrame(() => desenharGrafico(grafico, a, temPosicao ? c.precoEntrada : null));
+  }
+
+  /** Gráfico de linha do ativo com as médias de 9 e 26 e, com posição, o preço de entrada. */
+  function desenharGrafico(tela, a, entrada) {
+    const largura = tela.clientWidth || 600;
+    const altura = 220;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    tela.width = Math.round(largura * dpr);
+    tela.height = Math.round(altura * dpr);
+    tela.style.height = `${altura}px`;
+    const g = tela.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const serie = a.historico.slice(-130);
+    if (serie.length < 2) return;
+    const m9 = (a.medias?.[9] ?? []).slice(-serie.length);
+    const m26 = (a.medias?.[26] ?? []).slice(-serie.length);
+    const todos = [...serie, ...m9, ...m26, ...(entrada ? [entrada] : [])].filter((x) => Number.isFinite(x));
+    const min = Math.min(...todos);
+    const max = Math.max(...todos);
+    const faixa = max - min || 1;
+    const margem = { esq: 8, dir: 74, cima: 10, baixo: 18 };
+    const px = (i) => margem.esq + (i / (serie.length - 1)) * (largura - margem.esq - margem.dir);
+    const py = (val) => margem.cima + (1 - (val - min) / faixa) * (altura - margem.cima - margem.baixo);
+    g.fillStyle = 'rgba(127,140,170,0.08)';
+    g.fillRect(0, 0, largura, altura);
+    g.strokeStyle = 'rgba(127,140,170,0.18)';
+    g.lineWidth = 1;
+    g.font = '11px ui-monospace, Consolas, monospace';
+    g.fillStyle = 'rgba(160,172,200,0.9)';
+    g.textAlign = 'left';
+    for (let i = 0; i <= 4; i++) {
+      const val = min + (faixa * i) / 4;
+      const y = py(val);
+      g.beginPath();
+      g.moveTo(margem.esq, y);
+      g.lineTo(largura - margem.dir, y);
+      g.stroke();
+      g.fillText(formatarPreco(a, val), largura - margem.dir + 6, y + 4);
+    }
+    const linha = (valores, cor, w) => {
+      g.strokeStyle = cor;
+      g.lineWidth = w;
+      g.beginPath();
+      let comecou = false;
+      valores.forEach((val, i) => {
+        if (!Number.isFinite(val)) return;
+        const x = px(i + (serie.length - valores.length));
+        if (comecou) g.lineTo(x, py(val));
+        else {
+          g.moveTo(x, py(val));
+          comecou = true;
+        }
+      });
+      g.stroke();
+    };
+    linha(m26, '#7cc4ff', 1.2);
+    linha(m9, '#ffd166', 1.2);
+    linha(serie, serie[serie.length - 1] >= serie[0] ? '#3ddc84' : '#ff6b6b', 2);
+    if (entrada) {
+      g.setLineDash([5, 4]);
+      g.strokeStyle = '#e8c35a';
+      g.lineWidth = 1.2;
+      g.beginPath();
+      g.moveTo(margem.esq, py(entrada));
+      g.lineTo(largura - margem.dir, py(entrada));
+      g.stroke();
+      g.setLineDash([]);
+    }
+    // ponto do preço de agora
+    g.fillStyle = '#fff';
+    g.beginPath();
+    g.arc(px(serie.length - 1), py(serie[serie.length - 1]), 3.5, 0, Math.PI * 2);
+    g.fill();
+  }
 
   // ---------------------------------------------------------------- tamanho e cenário fixo
 
@@ -1043,7 +1355,8 @@ export function montarEscritorio(raiz, opcoes = {}) {
     const disponivel = cheia ? window.innerWidth : palco.clientWidth || 800;
     const alturaMax = cheia ? window.innerHeight : Math.max(360, window.innerHeight - 150);
     const largura = Math.floor(Math.min(disponivel, (alturaMax * D.LARGURA) / D.ALTURA));
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // com muitas mesas, resolução um pouco menor: é o que mais pesa em cada quadro
+    const dpr = Math.min(window.devicePixelRatio || 1, D.VAGAS_MESA.length > 24 ? 1.5 : 2);
     canvas.width = Math.round(largura * dpr);
     canvas.height = Math.round((largura * dpr * D.ALTURA) / D.LARGURA);
     canvas.style.width = `${largura}px`;
@@ -1055,6 +1368,67 @@ export function montarEscritorio(raiz, opcoes = {}) {
     const fctx = fundo.getContext('2d');
     fctx.setTransform(k, 0, 0, k, -D.ESQ * k, 0);
     D.desenharCenarioFixo(fctx, aleatorio(42));
+    cacheMesas.clear();
+    fundoVista = null;
+  }
+
+  // ---------------------------------------------------------------- caches do desenho
+
+  // Cada mesa (tampo, monitor com o gráfico e o nome) vira uma imagem pronta, refeita só quando o
+  // ativo, o preço ou o zoom mudam; o vapor da caneca é desenhado por cima a cada quadro.
+  const cacheMesas = new Map();
+  function desenharMesaComCache(i, vaga, dono, aberto, S) {
+    const ativo = dono?.ativo ?? null;
+    const escala = Math.round(S * 8) / 8;
+    // monitor piscando a decisão, ou zoom muito grande (imagem enorme): desenha direto
+    if ((dono?.flash && dono.flash.ate > tempo) || escala > 3.5) {
+      D.desenharMesa(ctx, vaga, ativo, dono, tempo, aberto);
+      return;
+    }
+    const base = ativo ? `${ativo.id}|${ativo.nome}|${ativo.simbolo}|${ativo.cor}|${ativo.historico.length}|${ativo.historico[ativo.historico.length - 1]}|${aberto}` : 'livre';
+    let c = cacheMesas.get(i);
+    const mesmaMesa = c && c.base === base;
+    // durante o zoom, a imagem antiga serve (esticada) até a câmera parar
+    if (!mesmaMesa || (c.escala !== escala && cameraParada())) {
+      const caixa = D.caixaDaMesa(vaga);
+      const tela = c?.tela ?? document.createElement('canvas');
+      tela.width = Math.max(1, Math.ceil(caixa.w * escala));
+      tela.height = Math.max(1, Math.ceil(caixa.h * escala));
+      const tctx = tela.getContext('2d');
+      tctx.setTransform(escala, 0, 0, escala, -caixa.x * escala, -caixa.y * escala);
+      D.desenharMesa(tctx, vaga, ativo, dono, tempo, aberto, { vapor: false });
+      c = { tela, base, escala, caixa };
+      cacheMesas.set(i, c);
+    }
+    ctx.drawImage(c.tela, c.caixa.x, c.caixa.y, c.tela.width / c.escala, c.tela.height / c.escala);
+    if (ativo) D.desenharVapor(ctx, vaga, tempo);
+  }
+
+  // com zoom, o cenário fixo é refeito na resolução da vista quando a câmera para (até lá, esticado)
+  let fundoVista = null;
+  function desenharFundo(v) {
+    if (cam.z === 1) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(fundo, 0, 0);
+      return;
+    }
+    const chave = `${cam.z}|${cam.x}|${cam.y}|${canvas.width}`;
+    if (cameraParada() && fundoVista?.chave !== chave) {
+      const tela = fundoVista?.tela ?? document.createElement('canvas');
+      tela.width = canvas.width;
+      tela.height = canvas.height;
+      const fctx = tela.getContext('2d');
+      fctx.setTransform(v.S, 0, 0, v.S, v.tx, v.ty);
+      D.desenharCenarioFixo(fctx, aleatorio(42));
+      fundoVista = { tela, chave };
+    }
+    if (fundoVista?.chave === chave) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(fundoVista.tela, 0, 0);
+      return;
+    }
+    ctx.setTransform(cam.z, 0, 0, cam.z, v.tx + D.ESQ * v.k * cam.z, v.ty);
+    ctx.drawImage(fundo, 0, 0);
   }
   const observador = new ResizeObserver(() => redimensionar());
   observador.observe(palco);
@@ -1086,15 +1460,19 @@ export function montarEscritorio(raiz, opcoes = {}) {
   }
 
   function desenhar() {
-    const k = canvas.width / D.LARGURA;
-    const mundo = () => ctx.setTransform(k, 0, 0, k, -D.ESQ * k, 0); // x do salão (com as alas) na tela
+    const v = vista();
+    const { k } = v;
+    const mundo = () => ctx.setTransform(v.S, 0, 0, v.S, v.tx, v.ty); // o salão (com alas e zoom) na tela
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     mundo();
-    ctx.clearRect(D.ESQ, 0, D.LARGURA, D.ALTURA);
     const luz = mercado.luzDoDia();
     D.desenharCeu(ctx, luz, tempo, predios);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.drawImage(fundo, 0, 0);
+    desenharFundo(v);
     mundo();
+    // o pedaço do salão que aparece: o que está fora não é desenhado
+    const visivel = { x0: -v.tx / v.S, y0: -v.ty / v.S, x1: (canvas.width - v.tx) / v.S, y1: (canvas.height - v.ty) / v.S };
+    const aparece = (x0, y0, x1, y1) => x1 >= visivel.x0 && x0 <= visivel.x1 && y1 >= visivel.y0 && y0 <= visivel.y1;
     D.desenharQuadroCotacoes(ctx, mercado.ativos, tempo, mercado.horaTexto(), mercado.relogio.dia);
 
     // sala do chefe: chefe sentado, mesa e vidro
@@ -1104,11 +1482,17 @@ export function montarEscritorio(raiz, opcoes = {}) {
 
     // o resto em ordem de profundidade
     const itens = [];
+    const donos = new Map(robos.filter((r) => r.vaga !== null).map((r) => [r.vaga, r]));
     D.VAGAS_MESA.forEach((vaga, i) => {
-      const dono = robos.find((r) => r.vaga === i);
-      itens.push({ y: vaga.y, desenhar: () => D.desenharMesa(ctx, vaga, dono?.ativo ?? null, dono, tempo, dono ? mercado.aberto(dono.ativo) : false) });
+      const caixa = D.caixaDaMesa(vaga);
+      if (!aparece(caixa.x, caixa.y, caixa.x + caixa.w, caixa.y + caixa.h)) return;
+      const dono = donos.get(i);
+      itens.push({ y: vaga.y, desenhar: () => desenharMesaComCache(i, vaga, dono, dono ? mercado.aberto(dono.ativo) : false, v.S) });
     });
-    for (const r of robos) itens.push({ y: r.y, desenhar: () => desenharRoboNaPosicao(r) });
+    for (const r of robos) {
+      if (!aparece(r.x - 70, r.y - r.lift - 170, r.x + 70, r.y + 20)) continue;
+      itens.push({ y: r.y, desenhar: () => desenharRoboNaPosicao(r) });
+    }
     itens.sort((a, b) => a.y - b.y);
     for (const it of itens) it.desenhar();
 
@@ -1143,7 +1527,9 @@ export function montarEscritorio(raiz, opcoes = {}) {
     return { ...r, y: r.y - (r.lift ?? 0), escalaY: r.y, levantado: (r.lift ?? 0) > 6 };
   }
   function desenharRoboNaPosicao(r) {
-    D.desenharRobo(ctx, comoDesenho(r), tempo, reduzido);
+    const d = comoDesenho(r);
+    if (r === emCima) d.selecionado = true; // anel de destaque debaixo do mouse
+    D.desenharRobo(ctx, d, tempo, reduzido);
   }
 
   let proximaAtualizacaoDom = 0;
@@ -1151,10 +1537,12 @@ export function montarEscritorio(raiz, opcoes = {}) {
     const dtReal = Math.min(0.05, (agora - ultimo) / 1000);
     ultimo = agora;
     if (!pausado) atualizar(dtReal * velocidade);
+    passoCamera(dtReal);
     desenhar();
     if (agora >= proximaAtualizacaoDom) {
       desenharCartoes();
       desenharEscala();
+      desenharDetalhe();
       proximaAtualizacaoDom = agora + 500;
     }
     rafId = requestAnimationFrame(quadro);
@@ -1213,6 +1601,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
 
   return {
     parar() {
+      detalhe?.dialogo.close();
       cancelAnimationFrame(rafId);
       observador.disconnect();
       window.removeEventListener('resize', redimensionar);

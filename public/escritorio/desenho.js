@@ -458,7 +458,7 @@ export function desenharLuz(ctx, luz, t) {
     g.addColorStop(0, `rgba(255, 228, 170, ${0.16 + noite * 0.22 + pulso})`);
     g.addColorStop(1, 'rgba(255, 228, 170, 0)');
     ctx.fillStyle = g;
-    ctx.fillRect(x - 330, 0, 660, ALTURA);
+    ctx.fillRect(x - 330, 0, 660, Math.min(ALTURA, 600));
     ctx.fillStyle = '#d9d2c0';
     ctx.fillRect(x - 1, 0, 2, 18);
     ctx.beginPath();
@@ -469,8 +469,12 @@ export function desenharLuz(ctx, luz, t) {
 
 // ------------------------------------------------------------------ mesas e monitores
 
-/** Mesa de uma vaga. Sem `ativo`, é uma mesa livre (monitor desligado). */
-export function desenharMesa(ctx, vaga, ativo, robo, t, aberto) {
+/**
+ * Mesa de uma vaga. Sem `ativo`, é uma mesa livre (monitor desligado). Com `vapor: false`, não
+ * desenha o vapor da caneca (a única parte que mexe a cada quadro): assim a mesa pode ir para um
+ * cache e o vapor vem por cima com `desenharVapor`.
+ */
+export function desenharMesa(ctx, vaga, ativo, robo, t, aberto, { vapor = true } = {}) {
   const { x, y } = vaga;
   const s = escalaEm(y);
   const largura = 190 * s;
@@ -522,6 +526,22 @@ export function desenharMesa(ctx, vaga, ativo, robo, t, aberto) {
   ctx.fill();
   ctx.fillStyle = ativo.cor;
   ctx.fillRect(cx - 6 * s, cy - 7 * s, 12 * s, 3 * s);
+  if (vapor) desenharVapor(ctx, vaga, t);
+}
+
+/** O retângulo (em coordenadas do salão) que a mesa de uma vaga ocupa: sombra, monitor e caneca. */
+export function caixaDaMesa(vaga) {
+  const s = escalaEm(vaga.y);
+  return { x: vaga.x - 122 * s, y: vaga.y - 152 * s, w: 244 * s, h: 176 * s };
+}
+
+/** O vapor da caneca de uma mesa ocupada. */
+export function desenharVapor(ctx, vaga, t) {
+  const { x, y } = vaga;
+  const s = escalaEm(y);
+  const ladoMonitor = -vaga.lado;
+  const cx = x - ladoMonitor * 62 * s;
+  const cy = y - 54 * s - 12 * s;
   ctx.strokeStyle = 'rgba(255,255,255,0.35)';
   ctx.lineWidth = 1.5 * s;
   for (let i = 0; i < 2; i++) {

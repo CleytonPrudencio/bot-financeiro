@@ -638,10 +638,12 @@ api.get('/escritorio', async (_req, res) => {
     id: number; nome: string; simbolo: string; exchange: string; ativa: boolean; real: boolean; conta_modo: string;
     auto_ligado: boolean; auto_situacao: string | null; auto_checado_em: Date | null; ia_modo: string; ia_tipo: string;
     valor_ordem: number; posicao: number; custo_posicao: number; auto_varrer: boolean;
+    conta: string; auto_estilo: string; auto_tempo: string; auto_stop_pct: number; auto_alvo_pct: number;
     auto_varredura: { simbolo: string; preco: number | null; variacao_pct: number | null; motivo: string; virou: boolean }[] | null;
   }>(
     `select e.id, e.nome, e.simbolo, c.exchange, e.ativa, e.real, c.modo as conta_modo, e.auto_ligado, e.auto_situacao,
             e.auto_checado_em, e.ia_modo, e.ia_tipo, e.valor_ordem, e.auto_varrer, e.auto_varredura,
+            c.nome as conta, e.auto_estilo, e.auto_tempo, e.auto_stop_pct, e.auto_alvo_pct,
             coalesce(p.quantidade, 0) as posicao, coalesce(p.custo_total, 0) as custo_posicao
        from estrategias e join contas c on c.id = e.conta_id left join posicoes p on p.estrategia_id = e.id
       order by e.ativa desc, e.id`,
