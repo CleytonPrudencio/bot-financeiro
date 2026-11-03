@@ -52,8 +52,52 @@ function cartaoParada(r, recarregar) {
   );
 }
 
+// grupos que explicam a falta de compra (os outros são normais: desligada, com posição, comprou)
+const GRUPOS_ATENCAO = new Set(['sem_saldo', 'ia_vetou', 'limite_ia', 'risco_barrou', 'erro_ordem', 'erro_piloto', 'acao_cara', 'aviso']);
+const DICAS = {
+  sem_saldo: 'Confira o saldo na exchange ou na corretora (no MetaTrader, o "saldo livre" é o que conta).',
+  ia_vetou: 'O agente achou a entrada arriscada. Em Agente ou na estratégia dá para ajustar o rigor (ou deixar a IA consultiva).',
+  limite_ia: 'Cada estratégia consulta a IA poucas vezes por dia para não gastar crédito; aumente em "consultas à IA por dia".',
+  risco_barrou: 'Um limite da estratégia (intervalo, limite diário, posição) segurou a ordem.',
+  erro_ordem: 'A exchange ou a ponte recusou a ordem: veja o motivo em Sinais.',
+  erro_piloto: 'O piloto não conseguiu cotação ou velas (a ponte MT5 está aberta?).',
+  acao_cara: 'Na B3 só se compra ação inteira: aumente o valor por ordem ou deixe para as ações mais baratas.',
+  sem_sinal: 'É o normal com o mercado sem oportunidade: o piloto espera a entrada certa.',
+  bolsa_fechada: 'A B3 funciona em dias úteis, das 10h às 16h55.',
+};
+
+/** "Por que não está comprando?": a última passada de cada estratégia, em grupos. */
+function cartaoDiagnostico(d) {
+  const total = d.grupos.reduce((t, g) => t + g.n, 0);
+  const sinais = d.sinais_hoje ?? {};
+  const linhas = d.grupos.map((g) => {
+    const atencao = GRUPOS_ATENCAO.has(g.grupo);
+    const detalhe = h('div', { class: 'diag-detalhe', hidden: true },
+      DICAS[g.grupo] ? h('p', { class: 'suave' }, DICAS[g.grupo]) : null,
+      h('ul', {}, g.exemplos.map((x) => h('li', {}, h('strong', {}, x.nome), x.situacao ? `: ${x.situacao}` : ''))));
+    const linha = h('button', { class: `diag-linha ${atencao ? 'atencao' : ''}`, type: 'button', onclick: () => (detalhe.hidden = !detalhe.hidden) },
+      h('span', { class: 'diag-n mono' }, inteiro(g.n)),
+      h('span', { class: 'diag-rotulo' }, g.rotulo),
+      h('span', { class: 'diag-barra' }, h('i', { estilo: { width: `${Math.round((g.n / Math.max(1, total)) * 100)}%` } })));
+    return h('div', {}, linha, detalhe);
+  });
+  return h('div', { class: 'cartao diag' },
+    h('div', { class: 'cartao-topo' },
+      h('div', {}, h('h2', {}, 'Por que não está comprando?'), h('p', { class: 'suave' }, `O que cada uma das ${total} estratégias viu na última passada do piloto. Toque numa linha para ver exemplos.`)),
+      h('a', { class: 'link', href: '#/sinais' }, 'Sinais ', icone('seta'))),
+    h('div', { class: 'diag-lista' }, linhas),
+    h('div', { class: 'fichas diag-fichas' },
+      h('span', { class: 'ficha' }, `Hoje: ${inteiro(sinais.executado ?? 0)} executados · ${inteiro(sinais.rejeitado ?? 0)} rejeitados · ${inteiro(sinais.ignorado ?? 0)} ignorados · ${inteiro(sinais.erro ?? 0)} com erro`),
+      h('span', { class: `ficha ${d.real_no_servidor ? 'ficha-perigo' : ''}` }, d.real_no_servidor ? `${d.estrategias.em_real} estratégia(s) no real` : 'dinheiro real desligado no servidor'),
+      ...d.pontes_mt5.map((p) => h('span', { class: `ficha ${p.online ? '' : 'ficha-alerta'}` }, `${p.nome}: ponte ${p.online ? 'ligada' : 'parada'}${p.saldo_livre !== null ? ` · saldo livre ${fmt(p.saldo_livre)}` : ''}`))),
+    d.motivos_hoje.length
+      ? h('div', { class: 'diag-motivos' }, h('h3', {}, 'Motivos mais comuns hoje'),
+          h('ol', {}, d.motivos_hoje.map((m) => h('li', {}, h('span', { class: 'mono' }, `${inteiro(m.n)}×`), ' ', selo(m.situacao, m.situacao === 'erro' ? 'perigo' : 'alerta'), ' ', m.motivo))))
+      : null);
+}
+
 export async function paginaPainel({ recarregar, agendar }) {
-  const r = await api('GET', '/resumo');
+  const [r, diag] = await Promise.all([api('GET', '/resumo'), api('GET', '/diagnostico').catch(() => null)]);
   const serie = r.serie ?? [];
   const sinais = Object.fromEntries((r.sinais7d ?? []).map((x) => [x.situacao, Number(x.total)]));
   const totalSinais = Object.values(sinais).reduce((a, b) => a + b, 0);
@@ -82,6 +126,7 @@ export async function paginaPainel({ recarregar, agendar }) {
       kpi('Erros hoje', r.hoje.erros, { nomeIcone: 'alerta', formato: inteiro, classe: Number(r.hoje.erros) ? 'kpi-perigo' : '', nota: Number(r.hoje.erros) ? 'veja em Ordens' : 'nenhum' }),
     ])),
     cartaoParada(r, recarregar),
+    diag && diag.grupos.length ? cartaoDiagnostico(diag) : null,
     h('div', { class: 'grade-2-1' }, escalonar([
       h('div', { class: 'cartao' },
         h('div', { class: 'cartao-topo' }, h('div', {}, h('h2', {}, 'Volume negociado'), h('p', { class: 'suave' }, 'Compras e vendas executadas por dia, últimos 14 dias')),

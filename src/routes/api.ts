@@ -11,6 +11,7 @@ import { confirmarAlerta, recusarAlerta } from '../assistente/index.js';
 import { desligarTelegram, enviar as enviarTelegram, lerTelegram, salvarToken } from '../assistente/telegram.js';
 import { criarPilotoPadrao, POR_MOEDA, POR_MOEDA_REPIQUE } from '../piloto/index.js';
 import { PONTE_ONLINE_MS, QUOTEX, type Binaria } from '../binarias/index.js';
+import { agrupar } from '../diagnostico.js';
 import { moedas } from '../brokers/tipos.js';
 import { iniciarAnalise } from '../analise/index.js';
 import { agentePronto, iniciarTeste, lerConfig, salvarConfig, type ConfigAgente } from '../agente/index.js';
@@ -118,6 +119,44 @@ function urlWebhook(token: string): string {
 }
 
 // ------------------------------------------------------------------ resumo e parada geral
+
+/** Por que não está comprando: a última passada de cada estratégia em grupos e os motivos de hoje. */
+api.get('/diagnostico', async (_req, res) => {
+  const [estrategias, sinais, motivos, pontes] = await Promise.all([
+    query<{ nome: string; simbolo: string; ativa: boolean; auto_ligado: boolean; auto_situacao: string | null; posicao: number; real: boolean; conta_modo: string }>(
+      `select e.nome, e.simbolo, e.ativa, e.auto_ligado, e.auto_situacao, coalesce(p.quantidade, 0) as posicao, e.real, c.modo as conta_modo
+         from estrategias e join contas c on c.id = e.conta_id left join posicoes p on p.estrategia_id = e.id order by e.nome`,
+    ),
+    query<{ situacao: string; n: number }>(
+      `select situacao, count(*)::int as n from sinais
+        where recebido_em >= (date_trunc('day', now() at time zone $1) at time zone $1) group by 1`,
+      [config.fuso],
+    ),
+    query<{ situacao: string; motivo: string; n: number }>(
+      `select situacao, left(coalesce(motivo, '(sem motivo)'), 140) as motivo, count(*)::int as n from sinais
+        where recebido_em >= (date_trunc('day', now() at time zone $1) at time zone $1) and situacao <> 'executado'
+        group by 1, 2 order by 3 desc limit 6`,
+      [config.fuso],
+    ),
+    query<{ nome: string; ponte_visto_em: Date | null; ponte_info: Record<string, unknown> | null }>(
+      `select nome, ponte_visto_em, ponte_info from contas where exchange = $1`,
+      [MT5],
+    ),
+  ]);
+  res.json({
+    real_no_servidor: config.realLiberadoNoServidor,
+    estrategias: { total: estrategias.length, em_real: estrategias.filter((e) => e.real && e.conta_modo === 'real').length },
+    grupos: agrupar(estrategias.map((e) => ({ ...e, posicao: Number(e.posicao) }))),
+    sinais_hoje: Object.fromEntries(sinais.map((x) => [x.situacao, x.n])),
+    motivos_hoje: motivos,
+    pontes_mt5: pontes.map((c) => ({
+      nome: c.nome,
+      online: Boolean(c.ponte_visto_em && Date.now() - new Date(c.ponte_visto_em).getTime() < 60_000),
+      saldo: (c.ponte_info?.saldo as number | undefined) ?? null,
+      saldo_livre: (c.ponte_info?.saldo_livre as number | undefined) ?? null,
+    })),
+  });
+});
 
 api.get('/resumo', async (_req, res) => {
   const [parada] = await query<{ valor: boolean }>(`select valor from configuracoes where chave = 'parada_geral'`);

@@ -933,3 +933,20 @@ body.na-entrada { overflow: hidden; }
 /* binárias: resultado da aposta */
 .positivo { color: var(--ok); }
 .negativo { color: var(--perigo); }
+
+/* painel: por que não está comprando */
+.diag-lista { display: grid; gap: 4px; }
+.diag-linha { all: unset; box-sizing: border-box; width: 100%; cursor: pointer; display: grid; grid-template-columns: 44px minmax(0, 1fr) minmax(80px, 30%); align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; }
+.diag-linha:hover { background: color-mix(in srgb, var(--primaria) 8%, transparent); }
+.diag-linha:focus-visible { outline: 2px solid var(--primaria); }
+.diag-linha.atencao .diag-rotulo { color: var(--alerta); font-weight: 600; }
+.diag-n { font-size: 18px; font-weight: 700; text-align: right; }
+.diag-barra { height: 8px; border-radius: 99px; background: var(--trilho); overflow: hidden; }
+.diag-barra i { display: block; height: 100%; border-radius: 99px; background: var(--primaria); }
+.diag-linha.atencao .diag-barra i { background: var(--alerta); }
+.diag-detalhe { padding: 0 10px 8px 64px; font-size: 13px; }
+.diag-detalhe p { margin: 0 0 4px; }
+.diag-detalhe ul { margin: 0; padding-left: 16px; display: grid; gap: 3px; color: var(--suave); }
+.diag-fichas { margin-top: 10px; }
+.diag-motivos h3 { margin: 12px 0 6px; font-size: 14px; }
+.diag-motivos ol { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; }
