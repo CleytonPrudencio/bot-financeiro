@@ -136,7 +136,7 @@ describe('mercado fictício', () => {
 });
 
 // @ts-expect-error módulo JS do painel, sem tipos
-import { carteiraDa, criarMercadoReal, motivoDoRobo, propostaDoSinal, visualDa } from '../public/escritorio/aovivo.js';
+import { carteiraDa, casasPara, criarMercadoReal, motivoDoRobo, propostaDoSinal, visualDa } from '../public/escritorio/aovivo.js';
 
 describe('escritório ao vivo', () => {
   const estrategia = {
@@ -159,15 +159,25 @@ describe('escritório ao vivo', () => {
     expect(carteiraDa(estrategia, {}).precoEntrada).toBeCloseTo(500_000);
   });
 
+  it('casas decimais: moeda barata não vira 0,0000', () => {
+    expect(casasPara(426_600)).toBe(0);
+    expect(casasPara(513.7)).toBe(2);
+    expect(casasPara(0.4142)).toBe(4);
+    expect(casasPara(0.00002555)).toBe(8);
+    expect(casasPara(0)).toBe(2);
+  });
+
   it('a reunião encena o que o bot decidiu: agente barrou', () => {
     const ativo = criarMercadoReal({ estrategias: [estrategia] }).ativos[0];
     const p = propostaDoSinal({
       id: 7, acao: 'comprar', situacao: 'rejeitado', motivo: 'IA barrou: 0 aprovaram, 1 vetaram', ip: 'piloto',
-      id_externo: 'piloto-entrada-123', motivo_sinal: 'repique: IFR saiu de 24 (vendido demais) e a vela fechou em alta',
+      id_externo: 'piloto-entrada-123', preco_sinal: '3833.5', motivo_sinal: 'repique: IFR saiu de 24 (vendido demais) e a vela fechou em alta',
       recebido_em: '2026-10-29T18:00:00Z', ordem: null, pareceres: [],
       agente: { confianca: 0.7, etapas: { tecnica: { ok: true, resultado: { vies: 'contra', nota: 33 } }, previsao: { ok: true, resultado: { vies: 'contra', nota: 13 } } } },
     }, ativo);
     expect(p).toMatchObject({ real: true, lado: 'compra', motivo: 'repique (piloto)', decisao: { aprovado: false } });
+    // o preço é o do sinal, não o do par em que o robô está agora
+    expect(p.preco).toBe(3833.5);
     expect(p.verificacao.itens.map((i: { texto: string }) => i.texto)).toEqual([
       'Origem: Piloto automático', 'Kronos: contra (13/100)', 'Técnica: contra (33/100)', 'Barrado: IA barrou: 0 aprovaram, 1 veta…', // cortado para caber no holograma
     ]);

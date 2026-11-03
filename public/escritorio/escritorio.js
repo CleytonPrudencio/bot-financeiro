@@ -86,6 +86,8 @@ function h(tag, attrs = {}, ...filhos) {
 }
 
 const pct = (x) => `${Math.round(x * 100)}%`;
+/** O sinal pode ser de outro par que o do robô (varredura): formata com as casas do preço dele. */
+const comCasas = (ativo, p) => (p?.casas === undefined ? ativo : { ...ativo, casas: p.casas });
 
 // ------------------------------------------------------------------ montagem
 
@@ -520,7 +522,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
     const lado = p.lado === 'compra' ? 'COMPRA' : 'VENDA';
     falar(
       r,
-      `Proposta: ${lado} ${r.ativo.simbolo} a ${formatarPreco(r.ativo, p.preco)}.\n${p.motivo}.${p.real ? '' : ` Confiança ${pct(p.confianca)}.`}`,
+      `Proposta: ${lado} ${p.simboloDoSinal ?? r.ativo.simbolo} a ${formatarPreco(comCasas(r.ativo, p), p.preco)}.\n${p.motivo}.${p.real ? '' : ` Confiança ${pct(p.confianca)}.`}`,
       2.1,
       { deslocX: -110 },
     );
@@ -588,7 +590,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
       const texto = p.real && !p.ordem
         ? `Avisei o dono: ${p.lado === 'compra' ? 'comprar' : 'vender'} na XP.`
         : p.real
-        ? `${p.lado === 'compra' ? 'Comprei' : 'Vendi'} a ${formatarPreco(r.ativo, preco)} (${p.ordem?.modo === 'real' ? 'ordem real' : 'simulação'}).`
+        ? `${p.lado === 'compra' ? 'Comprei' : 'Vendi'} a ${formatarPreco(comCasas(r.ativo, p), preco)} (${p.ordem?.modo === 'real' ? 'ordem real' : 'simulação'}).`
         : p.lado === 'compra'
           ? `Comprei a ${formatarPreco(r.ativo, preco)}.`
           : `Vendi a ${formatarPreco(r.ativo, preco)}: ${resultado >= 0 ? 'lucro' : 'prejuízo'} de ${formatarPreco({ ...r.ativo, casas: 2 }, Math.abs(resultado))}.`;
@@ -1006,7 +1008,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
             h('strong', {}, `${aoVivo ? (e.robo.ativo.olheiro ? 'olheiro' : e.robo.ativo.nome) : e.robo.nome}: ${lado} ${p.simboloDoSinal ?? e.robo.ativo.simbolo}`),
             h('span', { class: `selo ${e.decisao.aprovado ? 'ok' : 'perigo-txt'}` }, e.decisao.aprovado ? 'aprovado' : 'reprovado'),
           ),
-          h('div', { class: 'rotulo' }, `${e.hora} · ${formatarPreco(e.robo.ativo, p.preco)} · ${p.motivo}`),
+          h('div', { class: 'rotulo' }, `${e.hora} · ${formatarPreco(comCasas(e.robo.ativo, p), p.preco)} · ${p.motivo}`),
           h('div', { class: 'rotulo' }, p.real ? `${p.rodape} · ${e.decisao.motivo}` : `analista ${pct(p.confianca)} · chefe ${pct(e.verificacao.nota)} · juntos ${pct(e.decisao.combinada)} · ${e.decisao.motivo}`),
           h('ul', { class: 'escritorio-itens' }, e.verificacao.itens.map((i) => h('li', { class: i.ok ? 'ok' : 'perigo-txt' }, `${i.ok ? '✔' : '✖'} ${i.texto}`))),
           e.decisao.conselho
@@ -1016,7 +1018,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
                   : h('li', { class: 'rotulo' }, `… IA ${x.conector} falhou: ${x.erro}`)))
             : null,
           e.execucao
-            ? h('div', { class: 'rotulo' }, `executado a ${formatarPreco(e.robo.ativo, e.execucao.preco)}${p.lado === 'venda' && Number.isFinite(e.execucao.resultado) ? ` · resultado ${e.execucao.resultado >= 0 ? '+' : ''}${e.execucao.resultado.toFixed(2)}` : ''}`)
+            ? h('div', { class: 'rotulo' }, `executado a ${formatarPreco(comCasas(e.robo.ativo, p), e.execucao.preco)}${p.lado === 'venda' && Number.isFinite(e.execucao.resultado) ? ` · resultado ${e.execucao.resultado >= 0 ? '+' : ''}${e.execucao.resultado.toFixed(2)}` : ''}`)
             : null,
         );
       }),

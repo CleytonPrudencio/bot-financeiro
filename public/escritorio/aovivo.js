@@ -36,7 +36,13 @@ function moedaDe(simbolo) {
   return cotacao;
 }
 
-const casasPara = (preco) => (preco >= 1000 ? 0 : preco >= 1 ? 2 : 4);
+/** Casas decimais para mostrar um preço: moeda barata (SHIB, PEPE) precisa de mais que 4. */
+export const casasPara = (preco) => {
+  if (!(preco > 0)) return 2;
+  if (preco >= 1000) return 0;
+  if (preco >= 1) return 2;
+  return Math.min(10, Math.max(4, 3 - Math.floor(Math.log10(preco))));
+};
 
 // `par` é um "olheiro": um par que o piloto da estratégia está varrendo (sem posição própria)
 function montarAtivo(e, indice, par = null) {
@@ -206,7 +212,9 @@ export function propostaDoSinal(s, ativo) {
     sinalId: s.id,
     simboloDoSinal: s.simbolo ?? null,
     lado,
-    preco: Number(s.ordem?.preco ?? ativo.preco),
+    // o preço do sinal (ou o da ordem, se saiu); o do robô agora pode ser de outro par
+    preco: Number(s.ordem?.preco ?? s.preco_sinal ?? ativo.preco),
+    casas: casasPara(Number(s.ordem?.preco ?? s.preco_sinal ?? ativo.preco)),
     motivo: motivoDoSinal(s),
     confianca: Number(confianca),
     urgente: /^piloto-(stop|alvo|protecao)/.test(s.id_externo ?? ''),
