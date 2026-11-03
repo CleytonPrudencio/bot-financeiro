@@ -761,6 +761,10 @@ export function montarEscritorio(raiz, opcoes = {}) {
   );
   const botaoTela = h('button', { class: 'pequeno secundario', onclick: () => telaCheia() }, 'Tela cheia');
   const listaRegistro = h('ol', { class: 'escritorio-registro', 'aria-live': 'polite' });
+  // ao vivo, as decisões ficam embaixo na largura toda: mostra as 12 mais novas e o resto sob pedido
+  const DECISOES_VISIVEIS = 12;
+  let todasDecisoes = false;
+  const botaoMaisDecisoes = h('button', { class: 'pequeno secundario', type: 'button', hidden: true, onclick: () => { todasDecisoes = !todasDecisoes; desenharRegistro(); } });
   const cartoes = robos.map((r) => {
     const el = h('div', { class: 'escritorio-cartao', onclick: () => selecionar(r) });
     el.style.borderLeftColor = r.cor;
@@ -837,7 +841,17 @@ export function montarEscritorio(raiz, opcoes = {}) {
     h('h2', {}, 'Decisões'),
     listaRegistro,
   );
-  raiz.replaceChildren(h('div', { class: 'escritorio' }, palco, lateral));
+  // ao vivo: controles em cima, o escritório na largura toda e, embaixo, as decisões e os robôs
+  const vivo = aoVivo
+    ? h('div', { class: 'escritorio escritorio-vivo' },
+        h('div', { class: 'escritorio-barra' },
+          h('p', { class: 'rotulo' }, 'Cada robô é uma estratégia sua (ou um par que o piloto está olhando), com o preço real. Cada sinal vira uma reunião com o chefe.'),
+          h('div', { class: 'acoes' }, botaoPausa, ...botoesVel, botaoTela)),
+        palco,
+        h('section', { class: 'escritorio-decisoes' }, h('h2', {}, 'Decisões'), h('p', { class: 'rotulo' }, 'Aprovadas e recusadas, da mais nova para a mais antiga.'), listaRegistro, h('div', { class: 'acoes escritorio-decisoes-mais' }, botaoMaisDecisoes)),
+        quadroRobos)
+    : null;
+  raiz.replaceChildren(vivo ?? h('div', { class: 'escritorio' }, palco, lateral));
 
   function alternarPausa() {
     pausado = !pausado;
@@ -969,8 +983,11 @@ export function montarEscritorio(raiz, opcoes = {}) {
   }
 
   function desenharRegistro() {
+    const visiveis = aoVivo && !todasDecisoes ? registro.slice(0, DECISOES_VISIVEIS) : registro;
+    botaoMaisDecisoes.hidden = !aoVivo || registro.length <= DECISOES_VISIVEIS;
+    botaoMaisDecisoes.textContent = todasDecisoes ? 'Mostrar só as mais novas' : `Mostrar todas (${registro.length})`;
     listaRegistro.replaceChildren(
-      ...registro.map((e) => {
+      ...visiveis.map((e) => {
         const p = e.proposta;
         const lado = p.lado === 'compra' ? 'compra' : 'venda';
         return h(

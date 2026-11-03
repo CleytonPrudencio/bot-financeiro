@@ -812,6 +812,27 @@ body.na-entrada { overflow: hidden; }
 .escritorio-cartao { background: var(--painel); border: 1px solid var(--borda); border-left: 4px solid var(--primaria); border-radius: 12px; padding: 10px 12px; cursor: pointer; display: grid; gap: 4px; transition: border-color 0.2s, transform 0.2s var(--mola); }
 .escritorio-cartao:hover { transform: translateX(2px); }
 .escritorio-cartao.selecionado { box-shadow: 0 0 0 2px var(--alerta); }
+/* escritório ao vivo: bolsas no topo, palco na largura toda, decisões e robôs embaixo */
+.bolsas-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+.bolsa-chave { position: relative; display: inline-flex; align-items: center; gap: 10px; padding: 9px 14px 9px 10px; border-radius: 14px; border: 1px solid var(--borda); background: var(--painel); cursor: pointer; transition: border-color 0.2s, background 0.2s; }
+.bolsa-chave input { position: absolute; opacity: 0; pointer-events: none; }
+.bolsa-chave.ligada { border-color: color-mix(in srgb, var(--ok) 55%, var(--borda)); background: color-mix(in srgb, var(--ok) 8%, var(--painel)); }
+.bolsa-chave:not(.ligada) { opacity: 0.7; }
+.bolsa-chave:has(input:focus-visible) { outline: 2px solid var(--primaria); outline-offset: 2px; }
+.bolsa-chave input:checked + .interruptor-trilho { background: linear-gradient(90deg, var(--ok), var(--ciano)); border-color: transparent; }
+.bolsa-chave input:checked + .interruptor-trilho .interruptor-bola { transform: translateX(17px); }
+.bolsa-chave-texto { display: grid; line-height: 1.25; }
+.bolsa-chave-texto small { color: var(--suave); font-size: 11.5px; }
+.bolsas-dica { flex-basis: 100%; }
+.escritorio.escritorio-vivo { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.escritorio-barra { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; }
+.escritorio-barra .rotulo { margin: 0; }
+.escritorio-decisoes h2 { margin: 6px 0 2px; }
+.escritorio-decisoes > .rotulo { margin: 0 0 10px; }
+.escritorio-decisoes-mais { margin-top: 10px; justify-content: center; }
+.escritorio-vivo .escritorio-registro { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); align-items: start; }
+.escritorio-vivo .escritorio-registro:empty::before { content: 'Nenhuma decisão ainda: elas aparecem aqui assim que um sinal chegar.'; color: var(--suave); font-size: 13px; }
+.escritorio-vivo .quadro-robos-lista { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); column-gap: 14px; align-items: start; }
 /* escritório ao vivo: quadro compacto, uma linha por robô */
 .quadro-robos { background: var(--painel); border: 1px solid var(--borda); border-radius: 12px; padding: 10px; display: grid; gap: 8px; }
 .quadro-robos-lista { display: grid; gap: 2px; }

@@ -1,7 +1,7 @@
 // Painel do Bot Financeiro: moldura (menu lateral, topo, faixa de cotações), rotas e transições.
 // As páginas ficam em js/paginas/; a base (DOM seguro, API, avisos) em js/base.js.
 
-import { $, agora, api, FUSO, botao, botaoIcone, h, icone, marca, precoCompacto, quandoSessaoExpirar, reduzido, tentar } from './js/base.js';
+import { $, agora, api, FUSO, botao, botaoIcone, h, icone, marca, precoCompacto, quandoSessaoExpirar, reduzido, tentar, vazio } from './js/base.js';
 import { telaLogin } from './js/login.js';
 import { paginaPainel } from './js/paginas/painel.js';
 import { paginaEstrategias } from './js/paginas/estrategias.js';
@@ -24,6 +24,52 @@ function lerModoEscritorio() {
   }
 }
 
+// Escritório ao vivo: as bolsas no topo, como liga/desliga, escolhem quais robôs aparecem
+const CHAVE_BOLSAS_OCULTAS = 'escritorio:bolsas-ocultas';
+const NOME_BOLSA = { binance: 'Binance', mt5: 'B3 · MetaTrader', b3: 'B3 · Assistente', mercado: 'Mercado Bitcoin' };
+const nomeBolsa = (ex) => NOME_BOLSA[ex] ?? ex.charAt(0).toUpperCase() + ex.slice(1);
+function lerBolsasOcultas() {
+  try {
+    const v = JSON.parse(localStorage.getItem(CHAVE_BOLSAS_OCULTAS) ?? '[]');
+    return new Set(Array.isArray(v) ? v : []);
+  } catch {
+    return new Set();
+  }
+}
+function salvarBolsasOcultas(ocultas) {
+  try {
+    localStorage.setItem(CHAVE_BOLSAS_OCULTAS, JSON.stringify([...ocultas]));
+  } catch {
+    // sem armazenamento: vale só agora
+  }
+}
+
+/** Uma chave liga/desliga por bolsa: desligada some do escritório (a estratégia continua operando). */
+function barraBolsas(estrategias, ocultas, aoMudar) {
+  const bolsas = [...new Set(estrategias.map((e) => e.exchange))].sort((a, b) => nomeBolsa(a).localeCompare(nomeBolsa(b)));
+  return h('div', { class: 'bolsas-barra', role: 'group', 'aria-label': 'Bolsas no escritório' },
+    bolsas.map((ex) => {
+      const delas = estrategias.filter((e) => e.exchange === ex);
+      const ligada = !ocultas.has(ex);
+      const reais = delas.filter((e) => e.operando_real).length;
+      return h('label', { class: `bolsa-chave ${ligada ? 'ligada' : ''}` },
+        h('input', {
+          type: 'checkbox', checked: ligada,
+          onchange: (ev) => {
+            if (ev.target.checked) ocultas.delete(ex);
+            else ocultas.add(ex);
+            salvarBolsasOcultas(ocultas);
+            aoMudar();
+          },
+        }),
+        h('span', { class: 'interruptor-trilho' }, h('span', { class: 'interruptor-bola' })),
+        h('span', { class: 'bolsa-chave-texto' },
+          h('strong', {}, nomeBolsa(ex)),
+          h('small', {}, `${delas.filter((e) => e.ativa).length} de ${delas.length} ativas${reais ? ` · ${reais} no real` : ''}`)));
+    }),
+    h('span', { class: 'suave pequeno-texto bolsas-dica' }, 'Desligar aqui só esconde do escritório: a estratégia continua operando.'));
+}
+
 async function paginaEscritorio() {
   let modo = lerModoEscritorio();
   const [{ montarEscritorio }, ias, dados] = await Promise.all([
@@ -33,11 +79,18 @@ async function paginaEscritorio() {
   ]);
   const semEstrategias = modo === 'vivo' && !dados.estrategias.length;
   if (semEstrategias) modo = 'demo';
+  const ocultas = lerBolsasOcultas();
+  const filtrar = (d) => ({ ...d, estrategias: d.estrategias.filter((e) => !ocultas.has(e.exchange)) });
   const caixa = h('div');
-  const escritorio = montarEscritorio(caixa, modo === 'vivo'
-    ? { aoVivo: { dados, buscar: () => api('GET', '/escritorio'), agora } }
-    : { iasAtivas: ias.filter((c) => c.ativo).length, consultarIa: (pedido) => api('POST', '/ias/parecer', pedido) });
-  limpar.push(() => escritorio.parar());
+  const nenhumaBolsa = modo === 'vivo' && !filtrar(dados).estrategias.length;
+  if (nenhumaBolsa) {
+    caixa.replaceChildren(vazio('Todas as bolsas desligadas', 'Ligue uma bolsa na barra acima para ver os robôs dela no escritório.', 'escritorio'));
+  } else {
+    const escritorio = montarEscritorio(caixa, modo === 'vivo'
+      ? { aoVivo: { dados: filtrar(dados), buscar: () => api('GET', '/escritorio').then(filtrar), agora } }
+      : { iasAtivas: ias.filter((c) => c.ativo).length, consultarIa: (pedido) => api('POST', '/ias/parecer', pedido) });
+    limpar.push(() => escritorio.parar());
+  }
   const trocar = (novo) => {
     try {
       localStorage.setItem(CHAVE_MODO_ESCRITORIO, novo);
@@ -56,6 +109,7 @@ async function paginaEscritorio() {
           ? 'Você ainda não tem estratégias: por isso esta é a demonstração, com dados fictícios. Crie uma em Estratégias para ver o escritório ao vivo.'
           : 'Demonstração com dados fictícios: um robô para cada mercado, e nenhuma ordem sai daqui.')),
       h('div', { class: 'acoes' }, botaoModo('vivo', 'Ao vivo', 'energia'), botaoModo('demo', 'Demonstração', 'escritorio'))),
+    modo === 'vivo' ? barraBolsas(dados.estrategias, ocultas, () => rota({ suave: true })) : null,
     caixa,
   ];
 }
