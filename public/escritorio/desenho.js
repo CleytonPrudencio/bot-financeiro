@@ -1,7 +1,15 @@
-// Tudo que é desenho do escritório. Coordenadas lógicas de 1280 x 720; quem chama já aplicou a
-// escala do canvas. Nenhuma função aqui muda estado do jogo, só desenha.
+// Tudo que é desenho do escritório. Coordenadas lógicas de 1280 x 720 no núcleo (sala do chefe,
+// descanso, café e as 4 colunas de mesas); com muitas mesas, o salão cresce para os lados (`ESQ` fica
+// negativo e `LARGURA` aumenta). Quem chama já aplicou a escala do canvas e o deslocamento de `ESQ`.
+// Nenhuma função aqui muda estado do jogo, só desenha.
 
-export const LARGURA = 1280;
+/** Largura lógica do salão inteiro e onde ele começa (x do canto esquerdo; 0 sem alas extras). */
+export let LARGURA = 1280;
+export let ESQ = 0;
+const NUCLEO = 1280;
+const CENTRO = NUCLEO / 2;
+/** Cada ala extra de cada lado tem um par de mesas (duas colunas) e ocupa isto de largura. */
+const LARGURA_ALA = 520;
 /** Altura lógica: 720 com 2 fileiras de mesas; cresce 185 por fileira a mais (ver configurarMesas). */
 export let ALTURA = 720;
 const ALTURA_BASE = 720;
@@ -25,14 +33,50 @@ const COLUNAS = [
 const PRIMEIRA_FILEIRA_Y = 480;
 const ENTRE_FILEIRAS = 185;
 
-/** Mesas para `quantos` robôs (no mínimo 8): mais fileiras para baixo, e o escritório fica mais alto. */
-export function configurarMesas(quantos = 8) {
-  const fileiras = Math.max(2, Math.ceil(quantos / COLUNAS.length));
+/** As colunas de mesas com `alas` pares extras de cada lado, da esquerda para a direita. */
+function colunasCom(alas) {
+  const extras = [];
+  for (let k = 1; k <= alas; k++) {
+    for (const centro of [280 - k * LARGURA_ALA, 1000 + k * LARGURA_ALA]) extras.push({ x: centro - 120, lado: -1 }, { x: centro + 120, lado: 1 });
+  }
+  return [...COLUNAS, ...extras].sort((a, b) => a.x - b.x);
+}
+
+const fileirasPara = (quantos, colunas) => Math.max(2, Math.ceil(quantos / colunas));
+const alturaCom = (fileiras) => PRIMEIRA_FILEIRA_Y + (fileiras - 1) * ENTRE_FILEIRAS + 55;
+
+/**
+ * Quantas alas extras de cada lado usar numa tela de `largura` x `altura` px: com a tela larga, mais
+ * mesas lado a lado e menos fileiras, desde que os robôs não fiquem bem menores (até 10% menores
+ * vale, para usar a largura toda). Função pura (testada).
+ */
+export function escolherAlas(quantos, largura, altura, maximo = 3) {
+  let melhor = 0;
+  let maior = 0; // a maior escala vista (as alas aceitas não podem ficar 10% abaixo dela)
+  for (let alas = 0; alas <= maximo; alas++) {
+    const colunas = COLUNAS.length + 4 * alas;
+    if (alas > 0 && fileirasPara(quantos, colunas - 4) <= 2) break; // já cabe sem esta ala
+    const escala = Math.min(largura / (NUCLEO + 2 * alas * LARGURA_ALA), altura / alturaCom(fileirasPara(quantos, colunas)));
+    maior = Math.max(maior, escala);
+    if (escala >= maior * 0.9) melhor = alas;
+  }
+  return melhor;
+}
+
+/**
+ * Mesas para `quantos` robôs (no mínimo 8): fileiras de 4 colunas no núcleo, mais 4 por ala extra
+ * (`alas` de cada lado); as fileiras crescem para baixo e o escritório fica mais alto.
+ */
+export function configurarMesas(quantos = 8, alas = 0) {
+  const colunas = colunasCom(alas);
+  const fileiras = fileirasPara(quantos, colunas.length);
   VAGAS_MESA.length = 0;
   for (let f = 0; f < fileiras; f++) {
-    for (const c of COLUNAS) VAGAS_MESA.push({ x: c.x, y: PRIMEIRA_FILEIRA_Y + f * ENTRE_FILEIRAS, lado: c.lado });
+    for (const c of colunas) VAGAS_MESA.push({ x: c.x, y: PRIMEIRA_FILEIRA_Y + f * ENTRE_FILEIRAS, lado: c.lado });
   }
-  ALTURA = PRIMEIRA_FILEIRA_Y + (fileiras - 1) * ENTRE_FILEIRAS + 55;
+  ALTURA = alturaCom(fileiras);
+  ESQ = alas ? -alas * LARGURA_ALA : 0;
+  LARGURA = NUCLEO + 2 * alas * LARGURA_ALA;
   return VAGAS_MESA.length;
 }
 configurarMesas(8);
@@ -84,7 +128,7 @@ export function desenharCenarioFixo(ctx, rand) {
   parede.addColorStop(0, '#2a3244');
   parede.addColorStop(1, '#353f55');
   ctx.fillStyle = parede;
-  ctx.fillRect(0, 0, LARGURA, CHAO_Y);
+  ctx.fillRect(ESQ, 0, LARGURA, CHAO_Y);
 
   // janelas: deixa buracos transparentes (o céu é desenhado por baixo a cada quadro)
   for (const [x0, x1] of [[40, 440], [840, 1240]]) {
@@ -102,19 +146,20 @@ export function desenharCenarioFixo(ctx, rand) {
 
   // rodapé
   ctx.fillStyle = '#1b2130';
-  ctx.fillRect(0, CHAO_Y - 10, LARGURA, 10);
+  ctx.fillRect(ESQ, CHAO_Y - 10, LARGURA, 10);
 
   // chão de madeira em perspectiva
   const chao = ctx.createLinearGradient(0, CHAO_Y, 0, ALTURA);
   chao.addColorStop(0, '#6b5640');
   chao.addColorStop(1, '#8a6e50');
   ctx.fillStyle = chao;
-  ctx.fillRect(0, CHAO_Y, LARGURA, ALTURA - CHAO_Y);
+  ctx.fillRect(ESQ, CHAO_Y, LARGURA, ALTURA - CHAO_Y);
   ctx.strokeStyle = 'rgba(40, 28, 18, 0.25)';
   ctx.lineWidth = 1;
-  const fuga = { x: LARGURA / 2, y: -420 };
-  for (let i = -14; i <= 14; i++) {
-    const xBase = LARGURA / 2 + i * 120;
+  const fuga = { x: CENTRO, y: -420 };
+  const tabuas = Math.ceil((CENTRO - ESQ) / 120) + 8;
+  for (let i = -tabuas; i <= tabuas; i++) {
+    const xBase = CENTRO + i * 120;
     ctx.beginPath();
     const t = (CHAO_Y - fuga.y) / (ALTURA - fuga.y);
     ctx.moveTo(fuga.x + (xBase - fuga.x) * t, CHAO_Y);
@@ -123,8 +168,8 @@ export function desenharCenarioFixo(ctx, rand) {
   }
   for (let y = CHAO_Y + 12, passo = 14; y < ALTURA; y += passo, passo *= 1.08) {
     ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(LARGURA, y);
+    ctx.moveTo(ESQ, y);
+    ctx.lineTo(ESQ + LARGURA, y);
     ctx.stroke();
   }
 
@@ -138,7 +183,7 @@ export function desenharCenarioFixo(ctx, rand) {
   ctx.closePath();
   ctx.fill();
   ctx.fillStyle = 'rgba(30, 55, 90, 0.4)';
-  ctx.fillRect(0, 498, LARGURA, 50);
+  ctx.fillRect(ESQ, 498, LARGURA, 50);
 
   // sala do chefe: piso e parede do fundo
   ctx.fillStyle = '#4c5d78';
@@ -405,7 +450,7 @@ export function desenharLuz(ctx, luz, t) {
   const noite = 1 - luz;
   if (noite > 0.05) {
     ctx.fillStyle = `rgba(10, 18, 45, ${noite * 0.38})`;
-    ctx.fillRect(0, 0, LARGURA, ALTURA);
+    ctx.fillRect(ESQ, 0, LARGURA, ALTURA);
   }
   for (const x of [250, 640, 1030]) {
     const g = ctx.createRadialGradient(x, 40, 4, x, 260, 330);
@@ -967,7 +1012,7 @@ export function desenharBalao(ctx, r, t) {
   const w = Math.max(...linhas.map((l) => ctx.measureText(l).width)) + 20;
   const h = linhas.length * 17 + 12;
   let bx = r.x - w / 2 + (f.deslocX ?? 0);
-  bx = Math.max(8, Math.min(LARGURA - w - 8, bx));
+  bx = Math.max(ESQ + 8, Math.min(ESQ + LARGURA - w - 8, bx));
   const by = r.y - 108 * s - h - (1 - entrada) * 8;
   ctx.fillStyle = f.cor ?? 'rgba(255,255,255,0.96)';
   ctx.strokeStyle = 'rgba(0,0,0,0.15)';

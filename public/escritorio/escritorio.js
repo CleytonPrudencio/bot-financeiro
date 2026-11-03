@@ -93,8 +93,11 @@ export function montarEscritorio(raiz, opcoes = {}) {
   const reduzido = opcoes.reduzido ?? window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
   const aoVivo = opcoes.aoVivo ?? null;
   const mercado = aoVivo ? criarMercadoReal(aoVivo.dados) : criarMercadoFicticio(opcoes.semente ?? Date.now());
-  // ao vivo, uma mesa para cada robô que trabalha (as fileiras crescem de 4 em 4)
-  D.configurarMesas(aoVivo ? mercado.ativos.filter((a) => a.estrategia.ativa).length : 8);
+  // ao vivo, uma mesa para cada robô que trabalha; com a tela larga, o salão ganha alas dos lados
+  // (mais mesas lado a lado) em vez de crescer só para baixo
+  const trabalhando = aoVivo ? mercado.ativos.filter((a) => a.estrategia.ativa).length : 8;
+  const larguraTela = Math.max(320, window.innerWidth - (window.innerWidth > 980 ? 330 : 40));
+  D.configurarMesas(trabalhando, aoVivo ? D.escolherAlas(trabalhando, larguraTela, Math.max(360, window.innerHeight - 150)) : 0);
   if (aoVivo?.agora) mercado.usarRelogio(aoVivo.agora);
   let ultimoSinal = 0;
   let buscaId = 0;
@@ -1017,7 +1020,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
   // clique no canvas: seleciona o robô mais perto
   canvas.addEventListener('click', (ev) => {
     const ret = canvas.getBoundingClientRect();
-    const x = ((ev.clientX - ret.left) / ret.width) * D.LARGURA;
+    const x = ((ev.clientX - ret.left) / ret.width) * D.LARGURA + D.ESQ;
     const y = ((ev.clientY - ret.top) / ret.height) * D.ALTURA;
     let melhor = null;
     let menor = 60;
@@ -1050,7 +1053,7 @@ export function montarEscritorio(raiz, opcoes = {}) {
     fundo.width = canvas.width;
     fundo.height = canvas.height;
     const fctx = fundo.getContext('2d');
-    fctx.setTransform(k, 0, 0, k, 0, 0);
+    fctx.setTransform(k, 0, 0, k, -D.ESQ * k, 0);
     D.desenharCenarioFixo(fctx, aleatorio(42));
   }
   const observador = new ResizeObserver(() => redimensionar());
@@ -1084,13 +1087,14 @@ export function montarEscritorio(raiz, opcoes = {}) {
 
   function desenhar() {
     const k = canvas.width / D.LARGURA;
-    ctx.setTransform(k, 0, 0, k, 0, 0);
-    ctx.clearRect(0, 0, D.LARGURA, D.ALTURA);
+    const mundo = () => ctx.setTransform(k, 0, 0, k, -D.ESQ * k, 0); // x do salão (com as alas) na tela
+    mundo();
+    ctx.clearRect(D.ESQ, 0, D.LARGURA, D.ALTURA);
     const luz = mercado.luzDoDia();
     D.desenharCeu(ctx, luz, tempo, predios);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(fundo, 0, 0);
-    ctx.setTransform(k, 0, 0, k, 0, 0);
+    mundo();
     D.desenharQuadroCotacoes(ctx, mercado.ativos, tempo, mercado.horaTexto(), mercado.relogio.dia);
 
     // sala do chefe: chefe sentado, mesa e vidro
@@ -1114,7 +1118,8 @@ export function montarEscritorio(raiz, opcoes = {}) {
     D.desenharParticulas(ctx, particulas);
     for (const r of [...robos, chefe]) D.desenharBalao(ctx, comoDesenho(r), tempo);
 
-    // selo de simulação
+    // selo de simulação (no canto da tela, não do salão)
+    ctx.setTransform(k, 0, 0, k, 0, 0);
     ctx.fillStyle = aoVivo ? 'rgba(34, 160, 92, 0.94)' : 'rgba(178, 107, 0, 0.92)';
     ctx.beginPath();
     ctx.roundRect(14, 12, aoVivo ? 196 : 238, 24, 6);

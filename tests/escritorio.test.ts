@@ -218,6 +218,27 @@ describe('mesas do escritório', () => {
     expect(Desenho.escalaEm(1000)).toBe(1.12);
     Desenho.configurarMesas(8);
   });
+
+  it('com alas dos lados, mais mesas por fileira e o salão mais largo', () => {
+    expect(Desenho.configurarMesas(22, 1)).toBe(24); // 8 por fileira, 3 fileiras
+    expect(Desenho.ESQ).toBe(-520);
+    expect(Desenho.LARGURA).toBe(1280 + 2 * 520);
+    expect(Desenho.ALTURA).toBe(480 + 2 * 185 + 55);
+    const xs = Desenho.VAGAS_MESA.slice(0, 8).map((v: { x: number }) => v.x);
+    expect(xs).toEqual([...xs].sort((a, b) => a - b));
+    expect(Math.min(...xs)).toBeGreaterThan(Desenho.ESQ);
+    expect(Math.max(...xs)).toBeLessThan(Desenho.ESQ + Desenho.LARGURA);
+    Desenho.configurarMesas(8);
+    expect(Desenho.ESQ).toBe(0);
+    expect(Desenho.LARGURA).toBe(1280);
+  });
+
+  it('tela larga com muitos robôs ganha ala; poucos robôs ou tela estreita, não', () => {
+    expect(Desenho.escolherAlas(22, 1300, 700)).toBe(1);
+    expect(Desenho.escolherAlas(8, 1300, 700)).toBe(0);
+    expect(Desenho.escolherAlas(22, 360, 800)).toBe(0);
+    expect(Desenho.escolherAlas(40, 2400, 700)).toBeGreaterThanOrEqual(1);
+  });
 });
 
 // @ts-expect-error módulo JS do painel, sem tipos
