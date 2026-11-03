@@ -562,7 +562,13 @@ api.post('/estrategias/:id/ordem', async (req, res) => {
  * estratégia (ex.: todos os pares em BRL da Binance). Saem em SIMULAÇÃO: operar real é um passo do dono.
  */
 api.post('/estrategias/todas-as-moedas', async (req, res) => {
-  const d = validar(z.object({ conta_id: z.number().int().positive(), moeda: z.string().trim().toUpperCase().min(2).max(10).default('BRL'), estilo: z.enum(['tendencia', 'repique']).default('repique') }), req.body);
+  const d = validar(z.object({
+    conta_id: z.number().int().positive(),
+    moeda: z.string().trim().toUpperCase().min(2).max(10).default('BRL'),
+    estilo: z.enum(['tendencia', 'repique']).default('repique'),
+    // por estratégia; na B3 tem de pagar ao menos 1 ação inteira (o piloto pula as que não cabem)
+    valor: z.number().positive().max(1_000_000).optional(),
+  }), req.body);
   const conta = await umOuNada<Conta>(`select * from contas where id = $1 and exchange <> 'quotex'`, [d.conta_id]);
   if (!conta) throw new ErroPedido('conta não existe');
   const pares = await paresDaMoeda(conta.exchange, d.moeda, 500_000).catch((e: Error) => {
@@ -570,9 +576,10 @@ api.post('/estrategias/todas-as-moedas', async (req, res) => {
   });
   const existentes = new Set((await query<{ simbolo: string }>('select simbolo from estrategias where conta_id = $1', [conta.id])).map((e) => e.simbolo));
   const criadas: string[] = [];
-  for (const p of pares.slice(0, 30)) {
+  // na ponte MT5 a lista é a das ações que ela acompanha (até 60); nas exchanges, os 30 mais negociados
+  for (const p of pares.slice(0, conta.exchange === MT5 ? 60 : 30)) {
     if (existentes.has(p.simbolo)) continue;
-    const base = d.estilo === 'repique' ? POR_MOEDA_REPIQUE : POR_MOEDA;
+    const base = { ...(d.estilo === 'repique' ? POR_MOEDA_REPIQUE : POR_MOEDA), ...(d.valor ? { valor: d.valor } : {}) };
     await criarPilotoPadrao(conta.id, `Piloto ${p.simbolo.split('/')[0]}`, p.simbolo, conta.exchange === B3 ? { ...base, tempo: '1d', intervaloMin: 10 } : base);
     criadas.push(p.simbolo);
   }

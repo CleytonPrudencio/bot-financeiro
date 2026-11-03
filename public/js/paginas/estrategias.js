@@ -220,7 +220,7 @@ function todasAsMoedas(contas, recarregar) {
     onsubmit: async (ev) => {
       ev.preventDefault();
       const d = lerForm(form);
-      const r = await tentar(() => api('POST', '/estrategias/todas-as-moedas', { conta_id: Number(d.conta_id), moeda: d.moeda, estilo: d.estilo }));
+      const r = await tentar(() => api('POST', '/estrategias/todas-as-moedas', { conta_id: Number(d.conta_id), moeda: d.moeda, estilo: d.estilo, valor: d.valor ?? undefined }));
       if (r) {
         dlg.fechar();
         avisar(r.criadas.length ? `Criei ${r.criadas.length} estratégias: ${r.criadas.join(', ')}` : 'Todas as moedas já tinham estratégia', 'ok');
@@ -228,13 +228,14 @@ function todasAsMoedas(contas, recarregar) {
       }
     },
   },
-  h('p', { class: 'suave' }, 'Cria uma estratégia de piloto para cada par da moeda com volume (ex.: tudo em BRL), com posição própria: velas de 1 min, R$ 15 por ordem e no máximo 2 consultas à IA por moeda por dia. Repique: alvo +1,5% e stop -1%; tendência: alvo +3% e stop -1,5%. Todas nascem em simulação.'),
+  h('p', { class: 'suave' }, 'Cria uma estratégia de piloto para cada par da moeda com volume (ex.: tudo em BRL) ou, na conta MetaTrader 5, para cada ação que a ponte acompanha (as ~50 mais negociadas da B3). Cada uma tem posição própria: velas de 1 min e no máximo 2 consultas à IA por dia. Repique: alvo +1,5% e stop -1%; tendência: alvo +3% e stop -1,5%. Todas nascem em simulação; as que já existem ficam como estão.'),
   h('div', { class: 'campos' },
     escolha('Conta', 'conta_id', contas.map((c) => [c.id, `${c.nome} (${c.exchange})`]), contas[0]?.id),
     campo('Moeda de cotação', { name: 'moeda', value: 'BRL', required: true }),
+    campo('Valor por ordem (cada estratégia)', { name: 'valor', type: 'number', step: '0.01', min: '1', placeholder: '15' }, 'na B3 só se compra ação inteira: com R$ 100 de saldo, use 90 (o piloto pula a ação que custa mais)'),
     escolha('Estilo', 'estilo', [['repique', 'Repique (compra a queda que começa a voltar)'], ['tendencia', 'Tendência (compra a favor da alta)']], 'repique')),
   h('div', { class: 'acoes acoes-fim' }, botao('Criar', { nomeIcone: 'mais', type: 'submit' })));
-  const dlg = janela('Uma estratégia por moeda', { icone: 'estrategias' }, form);
+  const dlg = janela('Uma estratégia por moeda ou ação', { icone: 'estrategias' }, form);
 }
 
 /** Liga "operar real" em todas as estratégias de contas reais. */
@@ -278,7 +279,7 @@ export async function paginaEstrategias({ recarregar }) {
   };
   return [
     cabecalho('Estratégias', 'Cada estratégia recebe sinais (webhook, piloto ou os botões Comprar e Vender) e passa por regras de risco antes de virar ordem',
-      botao('Todas as moedas', { classe: 'secundario', nomeIcone: 'robo', disabled: !contas.length, onclick: () => todasAsMoedas(contas, recarregar) }),
+      botao('Todas as moedas e ações', { classe: 'secundario', nomeIcone: 'robo', disabled: !contas.length, onclick: () => todasAsMoedas(contas, recarregar) }),
       botao('Operar real em todas', { classe: 'secundario', nomeIcone: 'energia', disabled: !estrategias.length, onclick: () => realEmTodas(estrategias, recarregar) }),
       botao('Nova estratégia', { nomeIcone: 'mais', disabled: !contas.length, onclick: nova })),
     !contas.length
