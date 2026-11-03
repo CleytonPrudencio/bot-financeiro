@@ -164,7 +164,8 @@ const curto = (t, n = 40) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 
 function motivoDoSinal(s) {
   const id = s.id_externo ?? '';
-  if (id.startsWith('piloto-entrada')) return 'virada para alta (piloto)';
+  // a entrada diz o porquê do piloto (repique ou tendência), não um texto fixo
+  if (id.startsWith('piloto-entrada')) return s.motivo_sinal ? `${curto(s.motivo_sinal.split(':')[0], 40)} (piloto)` : 'entrada do piloto';
   if (id.startsWith('piloto-stop')) return 'stop de perda (piloto)';
   if (id.startsWith('piloto-alvo')) return 'alvo de ganho (piloto)';
   if (id.startsWith('piloto-protecao')) return 'proteção do ganho (piloto)';

@@ -713,6 +713,7 @@ api.get('/escritorio', async (_req, res) => {
   const sinais = await query(
     `select s.id, s.estrategia_id, s.acao, s.situacao, s.motivo, s.ip, s.recebido_em, s.corpo->>'id' as id_externo,
             s.corpo->>'simbolo' as simbolo,
+            left(s.corpo->>'motivo', 160) as motivo_sinal,
             (select json_build_object('etapas', a.etapas, 'decisao', a.decisao, 'confianca', a.confianca, 'motivo', a.motivo)
                from agente_execucoes a where a.sinal_id = s.id limit 1) as agente,
             (select coalesce(json_agg(json_build_object('conector', p.conector_nome, 'decisao', p.decisao, 'confianca', p.confianca,

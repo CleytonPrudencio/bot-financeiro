@@ -163,10 +163,11 @@ describe('escritório ao vivo', () => {
     const ativo = criarMercadoReal({ estrategias: [estrategia] }).ativos[0];
     const p = propostaDoSinal({
       id: 7, acao: 'comprar', situacao: 'rejeitado', motivo: 'IA barrou: 0 aprovaram, 1 vetaram', ip: 'piloto',
-      id_externo: 'piloto-entrada-123', recebido_em: '2026-10-29T18:00:00Z', ordem: null, pareceres: [],
+      id_externo: 'piloto-entrada-123', motivo_sinal: 'repique: IFR saiu de 24 (vendido demais) e a vela fechou em alta',
+      recebido_em: '2026-10-29T18:00:00Z', ordem: null, pareceres: [],
       agente: { confianca: 0.7, etapas: { tecnica: { ok: true, resultado: { vies: 'contra', nota: 33 } }, previsao: { ok: true, resultado: { vies: 'contra', nota: 13 } } } },
     }, ativo);
-    expect(p).toMatchObject({ real: true, lado: 'compra', motivo: 'virada para alta (piloto)', decisao: { aprovado: false } });
+    expect(p).toMatchObject({ real: true, lado: 'compra', motivo: 'repique (piloto)', decisao: { aprovado: false } });
     expect(p.verificacao.itens.map((i: { texto: string }) => i.texto)).toEqual([
       'Origem: Piloto automático', 'Kronos: contra (13/100)', 'Técnica: contra (33/100)', 'Barrado: IA barrou: 0 aprovaram, 1 veta…', // cortado para caber no holograma
     ]);
