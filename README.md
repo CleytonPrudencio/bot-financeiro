@@ -265,6 +265,9 @@ sequenceDiagram
   ordem com mais de 20 s de espera e compra acima de `PONTE_VALOR_MAX` (padrão R$ 200). Ordem que a
   ponte não pega em 30 s expira no bot e não é mais executada; pegou e não respondeu em 60 s vira
   erro para conferir no MetaTrader.
+- **Conta hedge** (o padrão de muitas corretoras na B3): a venda fecha as posições compradas pelo
+  número de cada uma (`planejar_fechamento`), nunca abre posição vendida. Na conta netting, a venda
+  vai direto.
 - **Pregão**: o piloto só olha a B3 em dias úteis, das 10h às 16h55 de Brasília.
 - Cotações e velas ficam em `mt5_mercado`; a análise usa o BOVA11 como referência de força relativa.
 

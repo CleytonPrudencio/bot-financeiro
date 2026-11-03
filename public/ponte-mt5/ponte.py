@@ -23,7 +23,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSAO = "1.0"
+VERSAO = "1.1"
 MAGIC = 50501  # marca as ordens do bot no MetaTrader
 LOTE_PADRAO = 100  # na B3, lote padrão de ações; abaixo disso, mercado fracionário (código + "F")
 IDADE_MAX_S = 20
@@ -51,6 +51,30 @@ def preco_medio(execucoes):
     if total <= 0:
         return 0, 0.0
     return total, sum(q * p for q, p in execucoes) / total
+
+
+def planejar_fechamento(posicoes, quantidade, lote=LOTE_PADRAO):
+    """Conta hedge: quais posições compradas fechar para vender `quantidade`.
+
+    posicoes: [(ticket, simbolo, volume)], da mais antiga para a mais nova. No lote padrão (PETR4)
+    só fecha múltiplo de 100; o resto sai das posições do fracionário (PETR4F). Devolve
+    [(ticket, simbolo, volume)]; o que não couber fica sem vender (a ponte avisa o bot da quantidade real).
+    """
+    restante = int(quantidade)
+    plano = []
+    padrao = [p for p in posicoes if not p[1].endswith("F")]
+    fracionario = [p for p in posicoes if p[1].endswith("F")]
+    for ticket, simbolo, volume in padrao:
+        fechar = min(int(volume), (restante // lote) * lote)
+        if fechar > 0:
+            plano.append((ticket, simbolo, fechar))
+            restante -= fechar
+    for ticket, simbolo, volume in fracionario:
+        fechar = min(int(volume), restante)
+        if fechar > 0:
+            plano.append((ticket, simbolo, fechar))
+            restante -= fechar
+    return plano
 
 
 def conferir_ordem(cmd, valor_max):
@@ -98,8 +122,11 @@ class MetaTrader:
             raise SystemExit("o MetaTrader 5 abriu, mas sem conta logada")
         if not mt5.terminal_info().trade_allowed:
             log.warning("o botão 'Algo Trading' do MetaTrader está desligado: as ordens vão ser recusadas")
+        # Na conta hedge (o padrão de muitas corretoras na B3), uma venda sem o número da posição
+        # abriria uma posição vendida nova (venda a descoberto) em vez de fechar a compra.
+        self.hedge = info.margin_mode == mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING
         self.tempos = {"1m": mt5.TIMEFRAME_M1, "5m": mt5.TIMEFRAME_M5, "15m": mt5.TIMEFRAME_M15, "1h": mt5.TIMEFRAME_H1, "4h": mt5.TIMEFRAME_H4, "1d": mt5.TIMEFRAME_D1}
-        log.info("MetaTrader conectado: %s, servidor %s", info.company, info.server)
+        log.info("MetaTrader conectado: %s, servidor %s, conta %s", info.company, info.server, "hedge" if self.hedge else "netting")
 
     def conta(self):
         info = self.mt5.account_info()
@@ -137,7 +164,7 @@ class MetaTrader:
             saida.append(item)
         return saida
 
-    def _enviar(self, simbolo, lado, quantidade):
+    def _enviar(self, simbolo, lado, quantidade, posicao=None):
         mt5 = self.mt5
         if not mt5.symbol_select(simbolo, True):
             raise RuntimeError(f"a corretora não tem {simbolo}")
@@ -158,6 +185,8 @@ class MetaTrader:
             "type_time": mt5.ORDER_TIME_DAY,
             "type_filling": preenchimento,
         }
+        if posicao is not None:
+            pedido["position"] = int(posicao)  # fecha esta posição (conta hedge)
         r = mt5.order_send(pedido)
         if r is None:
             raise RuntimeError(f"o MetaTrader não respondeu: {mt5.last_error()}")
@@ -165,13 +194,28 @@ class MetaTrader:
             raise RuntimeError(f"corretora recusou ({r.retcode}): {r.comment}")
         return float(r.volume), float(r.price or pedido["price"]), str(r.order)
 
+    def _fechamento(self, cmd):
+        """Conta hedge: a venda fecha as posições compradas, pelo número de cada uma."""
+        posicoes = []
+        for s in (cmd["simbolo"], cmd["simbolo"] + "F"):
+            for p in self.mt5.positions_get(symbol=s) or []:
+                if p.type == self.mt5.POSITION_TYPE_BUY:
+                    posicoes.append((p.time, p.ticket, p.symbol, p.volume))
+        posicoes.sort()
+        plano = planejar_fechamento([(t, s, v) for _, t, s, v in posicoes], cmd["quantidade"])
+        if not plano:
+            raise RuntimeError(f"nenhuma posição comprada de {cmd['simbolo']} no MetaTrader para vender")
+        return plano
+
     def executar(self, cmd):
-        padrao, fracionario = dividir_lote(cmd["quantidade"])
+        if cmd["lado"] == "venda" and self.hedge:
+            partes = self._fechamento(cmd)
+        else:
+            padrao, fracionario = dividir_lote(cmd["quantidade"])
+            partes = [(None, simbolo, qtd) for simbolo, qtd in ((cmd["simbolo"], padrao), (cmd["simbolo"] + "F", fracionario)) if qtd > 0]
         execucoes, ids = [], []
-        for simbolo, qtd in ((cmd["simbolo"], padrao), (cmd["simbolo"] + "F", fracionario)):
-            if qtd <= 0:
-                continue
-            q, p, ordem = self._enviar(simbolo, cmd["lado"], qtd)
+        for posicao, simbolo, qtd in partes:
+            q, p, ordem = self._enviar(simbolo, cmd["lado"], qtd, posicao)
             execucoes.append((q, p))
             ids.append(ordem)
         quantidade, preco = preco_medio(execucoes)

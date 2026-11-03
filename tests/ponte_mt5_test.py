@@ -26,6 +26,17 @@ class TestePonte(unittest.TestCase):
         self.assertEqual(ponte.preco_medio([(100, 10.0), (50, 13.0)]), (150, 11.0))
         self.assertEqual(ponte.preco_medio([]), (0, 0.0))
 
+    def test_planejar_fechamento(self):
+        # conta hedge: fecha pelo número da posição; lote padrão só em múltiplo de 100
+        posicoes = [(11, "PETR4", 200), (12, "PETR4F", 30), (13, "PETR4F", 10)]
+        self.assertEqual(ponte.planejar_fechamento(posicoes, 240), [(11, "PETR4", 200), (12, "PETR4F", 30), (13, "PETR4F", 10)])
+        self.assertEqual(ponte.planejar_fechamento(posicoes, 135), [(11, "PETR4", 100), (12, "PETR4F", 30), (13, "PETR4F", 5)])
+        # mais do que existe: vende o que tem
+        self.assertEqual(ponte.planejar_fechamento([(12, "PETR4F", 30)], 50), [(12, "PETR4F", 30)])
+        # 57 ações só no lote padrão não fecham (seria venda parcial fora do lote)
+        self.assertEqual(ponte.planejar_fechamento([(11, "PETR4", 100)], 57), [])
+        self.assertEqual(ponte.planejar_fechamento([], 10), [])
+
     def test_conferir_ordem(self):
         ok = {"lado": "compra", "quantidade": 1, "preco_ref": 38.0, "idade_s": 1.2}
         self.assertIsNone(ponte.conferir_ordem(ok, 200))
