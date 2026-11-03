@@ -117,7 +117,7 @@ def ler_env(arquivo):
     """Lê um arquivo CHAVE=valor (linhas com # são comentário)."""
     valores = {}
     if arquivo.exists():
-        for linha in arquivo.read_text(encoding="utf-8").splitlines():
+        for linha in arquivo.read_text(encoding="utf-8-sig").splitlines():
             linha = linha.strip()
             if linha and not linha.startswith("#") and "=" in linha:
                 chave, valor = linha.split("=", 1)

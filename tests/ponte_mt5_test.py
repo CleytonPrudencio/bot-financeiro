@@ -55,6 +55,9 @@ class TestePonte(unittest.TestCase):
             self.assertEqual(ponte.arquivo_env(pasta).name, "ponte.env.txt")
             (pasta / "ponte.env").write_text("BOT_URL=y", encoding="utf-8")
             self.assertEqual(ponte.arquivo_env(pasta).name, "ponte.env")
+            # Bloco de Notas com BOM: a primeira chave não pode vir com o caractere invisível
+            (pasta / "ponte.env").write_text("BOT_URL=y\nPONTE_TOKEN=abc", encoding="utf-8-sig")
+            self.assertEqual(ponte.ler_env(pasta / "ponte.env"), {"BOT_URL": "y", "PONTE_TOKEN": "abc"})
 
     def test_vela_e_env(self):
         v = {"time": 1700000000, "open": 1, "high": 2, "low": 0.5, "close": 1.5, "real_volume": 0, "tick_volume": 7}

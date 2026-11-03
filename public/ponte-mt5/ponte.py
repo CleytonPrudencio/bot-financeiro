@@ -109,7 +109,7 @@ def ler_env(arquivo):
     """Lê um arquivo CHAVE=valor (linhas com # são comentário)."""
     valores = {}
     if arquivo.exists():
-        for linha in arquivo.read_text(encoding="utf-8").splitlines():
+        for linha in arquivo.read_text(encoding="utf-8-sig").splitlines():
             linha = linha.strip()
             if linha and not linha.startswith("#") and "=" in linha:
                 chave, valor = linha.split("=", 1)
@@ -251,7 +251,12 @@ def principal():
     env = {**ler_env(arquivo_env(Path(__file__).parent)), **os.environ}
     url, token = env.get("BOT_URL"), env.get("PONTE_TOKEN")
     if not url or not token:
-        raise SystemExit("defina BOT_URL e PONTE_TOKEN (no ponte.env ao lado deste arquivo)")
+        arquivo = arquivo_env(Path(__file__).parent)
+        lidas = ", ".join(ler_env(arquivo)) or "nenhuma"
+        raise SystemExit(
+            f"defina BOT_URL e PONTE_TOKEN no ponte.env ao lado deste arquivo "
+            f"(procurei {arquivo}: {'existe' if arquivo.exists() else 'não existe'}; chaves lidas: {lidas})"
+        )
     valor_max = float(env.get("PONTE_VALOR_MAX", "200"))
     mt = MetaTrader()
     observar, tempos = [], ["15m", "1d"]
