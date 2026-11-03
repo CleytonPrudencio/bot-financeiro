@@ -356,7 +356,8 @@ export const PADRAO = {
   valor: 50,
   intervalo_min_seg: 3600, // uma hora entre ordens (o stop e as saídas passam por cima)
   desvio_max_pct: 1.5,
-  ia_contexto: 'Capital pequeno (R$ 50) e a prioridade é não perder dinheiro: só aprove a compra com sinais claros a favor; na dúvida, vete.',
+  // o stop e o alvo limitam a perda; o agente barra o que é claramente contra (migração 015)
+  ia_contexto: 'Capital pequeno: o stop de perda e o alvo já limitam cada operação. Aprove a compra quando nenhuma etapa importante (técnica ou risco) for claramente contra, mesmo que as outras fiquem neutras. Vete quando a técnica ou o risco forem contra, houver notícia grave ou queda descontrolada. Etapa que falhou não conta nem contra nem a favor.',
   stop: 3,
   alvo: 6,
   protecao: 2.5,
