@@ -12,6 +12,7 @@ import { desligarTelegram, enviar as enviarTelegram, lerTelegram, salvarToken } 
 import { criarPilotoPadrao, POR_MOEDA, POR_MOEDA_REPIQUE } from '../piloto/index.js';
 import { PONTE_ONLINE_MS, QUOTEX, type Binaria } from '../binarias/index.js';
 import { agrupar } from '../diagnostico.js';
+import { operacoesFechadas, porDia, resumoDoResultado, type OrdemExecutada } from '../resultado.js';
 import { moedas } from '../brokers/tipos.js';
 import { iniciarAnalise } from '../analise/index.js';
 import { agentePronto, iniciarTeste, lerConfig, salvarConfig, type ConfigAgente } from '../agente/index.js';
@@ -119,6 +120,57 @@ function urlWebhook(token: string): string {
 }
 
 // ------------------------------------------------------------------ resumo e parada geral
+
+/**
+ * Ganho e perda das operações fechadas (compra e venda), por moeda de cotação: total, hoje, acerto,
+ * resultado por dia (30 dias) e acumulado, e as últimas operações. `modo`: real (padrão), simulacao ou todos.
+ */
+api.get('/resultado', async (req, res) => {
+  const modo = ['real', 'simulacao', 'todos'].includes(String(req.query.modo)) ? String(req.query.modo) : 'real';
+  const ordens = await query<OrdemExecutada>(
+    `select o.estrategia_id, e.nome as estrategia, o.simbolo, o.lado, o.modo, o.quantidade, o.custo, o.taxa, o.criada_em
+       from ordens o join estrategias e on e.id = o.estrategia_id
+      where o.situacao = 'executada' and ($1 = 'todos' or o.modo = $1)
+      order by o.criada_em limit 50000`,
+    [modo],
+  );
+  const ops = operacoesFechadas(ordens);
+  const agora = new Date();
+  const moedas = [...new Set(ops.map((o) => o.moeda))];
+  const porMoeda = moedas
+    .map((moeda) => {
+      const daMoeda = ops.filter((o) => o.moeda === moeda);
+      return { moeda, ...resumoDoResultado(daMoeda, agora, config.fuso), por_dia: porDia(daMoeda, agora, config.fuso, 30) };
+    })
+    .sort((a, b) => b.operacoes - a.operacoes);
+  res.json({ modo, moedas: porMoeda, ultimas: ops.slice(-15).reverse() });
+});
+
+/** O que o painel ao vivo mostra, a cada poucos segundos: números de hoje e os últimos sinais e ordens. */
+api.get('/ao-vivo', async (_req, res) => {
+  const [hoje, exposicao, eventos] = await Promise.all([
+    query<{ ordens: number; compras: number; vendas: number; erros: number }>(
+      `select count(*) filter (where situacao = 'executada')::int as ordens,
+              coalesce(sum(custo) filter (where situacao = 'executada' and lado = 'compra'), 0) as compras,
+              coalesce(sum(custo - taxa) filter (where situacao = 'executada' and lado = 'venda'), 0) as vendas,
+              count(*) filter (where situacao = 'erro')::int as erros
+         from ordens where criada_em >= (date_trunc('day', now() at time zone $1) at time zone $1)`,
+      [config.fuso],
+    ),
+    query<{ total: number; posicoes: number }>(
+      `select coalesce(sum(custo_total), 0) as total, count(*) filter (where quantidade > 0)::int as posicoes from posicoes`,
+    ),
+    query(
+      `select s.id, s.recebido_em, s.acao, s.situacao, left(s.motivo, 160) as motivo, e.nome as estrategia,
+              coalesce(s.corpo->>'simbolo', e.simbolo) as simbolo, left(s.corpo->>'motivo', 120) as motivo_sinal,
+              (select json_build_object('lado', o.lado, 'modo', o.modo, 'preco', o.preco_medio, 'custo', o.custo, 'quantidade', o.quantidade)
+                 from ordens o where o.sinal_id = s.id and o.situacao = 'executada' limit 1) as ordem
+         from sinais s left join estrategias e on e.id = s.estrategia_id
+        order by s.id desc limit 15`,
+    ),
+  ]);
+  res.json({ agora: new Date().toISOString(), hoje: hoje[0], exposicao: exposicao[0], eventos });
+});
 
 /** Por que não está comprando: a última passada de cada estratégia em grupos e os motivos de hoje. */
 api.get('/diagnostico', async (_req, res) => {

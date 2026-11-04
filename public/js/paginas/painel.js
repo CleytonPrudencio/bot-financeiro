@@ -2,16 +2,33 @@ import {
   agora, api, botaoSegurar, cabecalho, confirmar, contar, data, escalonar, fmt, h, icone, inteiro, precoCompacto,
   FUSO, qtd, relativo, selo, seloLado, seloModo, tentar, vazio,
 } from '../base.js';
-import { graficoArea, linhaPequena, rosca } from '../graficos.js';
+import { graficoArea, graficoResultado, linhaPequena, rosca } from '../graficos.js';
 
 function saudacao() {
   const hora = Number(new Date(agora()).toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: FUSO }));
   return hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite';
 }
 
-function kpi(rotulo, valor, { nomeIcone, formato = (v) => fmt(v), serie, cor, nota, classe = '' }) {
+/** Anima um número de `de` até `para` (o painel ao vivo muda os KPIs sem recarregar). */
+function animarPara(el, de, para, formato) {
+  if (de === para) return;
+  const inicio = performance.now();
+  const passo = (t) => {
+    const k = Math.min(1, (t - inicio) / 700);
+    const e = 1 - Math.pow(1 - k, 3);
+    el.textContent = formato(de + (para - de) * e);
+    if (k < 1 && el.isConnected) requestAnimationFrame(passo);
+  };
+  requestAnimationFrame(passo);
+  el.classList.remove('kpi-mudou');
+  void el.offsetWidth; // reinicia a animação de destaque
+  el.classList.add('kpi-mudou');
+}
+
+function kpi(rotulo, valor, { nomeIcone, formato = (v) => fmt(v), serie, cor, nota, classe = '', vivos, chave }) {
   const numero = h('div', { class: 'kpi-valor' }, '0');
   contar(numero, valor, formato);
+  if (vivos && chave) vivos.set(chave, { numero, valor: Number(valor) || 0, formato });
   return h(
     'div',
     { class: `cartao kpi ${classe}` },
@@ -96,6 +113,143 @@ function cartaoDiagnostico(d) {
       : null);
 }
 
+const sinalDe = (v) => `${v > 0 ? '+' : ''}${fmt(v)}`;
+const classeDe = (v) => (v > 0 ? 'positivo' : v < 0 ? 'negativo' : '');
+const CHAVE_MODO_RESULTADO = 'painel:resultado-modo';
+
+/** Ganhos e perdas das operações fechadas, com o gráfico por dia; recarrega sozinho sem piscar. */
+function cartaoResultado() {
+  let modo = 'real';
+  try {
+    modo = localStorage.getItem(CHAVE_MODO_RESULTADO) || 'real';
+  } catch {
+    // sem armazenamento: começa no real
+  }
+  let assinatura = '';
+  let moedaEscolhida = null;
+  const corpo = h('div', { class: 'resultado-corpo' });
+  const botoes = [['real', 'Real'], ['simulacao', 'Simulação'], ['todos', 'Tudo']].map(([id, texto]) =>
+    h('button', {
+      type: 'button', class: id === modo ? 'escolhido' : '',
+      onclick: () => {
+        modo = id;
+        try {
+          localStorage.setItem(CHAVE_MODO_RESULTADO, id);
+        } catch {
+          // fica só agora
+        }
+        for (const b of botoes) b.classList.toggle('escolhido', b === botoes.find((x) => x.dataset.modo === id));
+        assinatura = '';
+        carregar();
+      },
+      'data-modo': id,
+    }, texto));
+  const el = h('div', { class: 'cartao resultado' },
+    h('div', { class: 'cartao-topo' },
+      h('div', {}, h('h2', {}, 'Ganhos e perdas'), h('p', { class: 'suave' }, 'Resultado de cada operação fechada (compra e depois venda), líquido de taxa, nos últimos 30 dias')),
+      h('div', { class: 'segmentado', role: 'group', 'aria-label': 'Qual dinheiro' }, botoes)),
+    corpo);
+
+  function desenhar(d) {
+    if (!d.moedas.length) {
+      corpo.replaceChildren(vazio('Nenhuma operação fechada ainda', modo === 'real' ? 'O resultado aparece aqui quando uma compra de verdade for vendida (no alvo, no stop ou na proteção).' : 'O resultado aparece quando uma compra for vendida.', 'cotacao'));
+      return;
+    }
+    const m = d.moedas.find((x) => x.moeda === moedaEscolhida) ?? d.moedas[0];
+    moedaEscolhida = m.moeda;
+    const numero = (rotulo, valor, classe = '', extra = '') => h('div', { class: 'resultado-numero' }, h('span', { class: 'suave' }, rotulo), h('strong', { class: `mono ${classe}` }, valor), extra ? h('small', { class: 'suave' }, extra) : null);
+    corpo.replaceChildren(
+      d.moedas.length > 1
+        ? h('div', { class: 'fichas' }, d.moedas.map((x) => h('button', {
+            type: 'button', class: `ficha ${x.moeda === m.moeda ? 'ficha-escolhida' : ''}`,
+            onclick: () => {
+              moedaEscolhida = x.moeda;
+              desenhar(d);
+            },
+          }, `${x.moeda}: ${sinalDe(x.total)}`)))
+        : null,
+      h('div', { class: 'resultado-numeros' },
+        numero('Resultado (30 dias)', `${sinalDe(m.por_dia.reduce((t, x) => t + x.resultado, 0))} ${m.moeda}`, classeDe(m.por_dia.reduce((t, x) => t + x.resultado, 0))),
+        numero('Hoje', `${sinalDe(m.hoje)} ${m.moeda}`, classeDe(m.hoje)),
+        numero('Operações', inteiro(m.operacoes), '', `${m.ganhas} ganhas · ${m.perdidas} perdidas`),
+        numero('Acerto', m.acerto_pct === null ? '—' : `${fmt(m.acerto_pct, 0)}%`),
+        numero('Maior ganho / perda', `${sinalDe(m.maior_ganho)} / ${sinalDe(m.maior_perda)}`)),
+      graficoResultado(m.por_dia, m.moeda),
+      h('div', { class: 'legenda-linha' },
+        h('span', {}, h('i', { class: 'bolinha bolinha-ganho' }), 'Ganho no dia'),
+        h('span', {}, h('i', { class: 'bolinha bolinha-perda' }), 'Perda no dia'),
+        h('span', {}, h('i', { class: 'bolinha bolinha-compra' }), 'Acumulado (eixo da direita)')),
+      d.ultimas.length
+        ? h('ol', { class: 'feed resultado-ultimas' }, d.ultimas.filter((o) => o.moeda === m.moeda).slice(0, 8).map((o) =>
+            h('li', { class: 'feed-item' },
+              h('span', { class: `mono ${classeDe(o.resultado)}` }, `${o.resultado_pct > 0 ? '+' : ''}${fmt(o.resultado_pct)}%`),
+              h('div', { class: 'feed-texto' }, h('strong', {}, o.simbolo), h('span', { class: 'suave' }, `${o.estrategia} · ${relativo(o.fechada_em)}`)),
+              h('span', { class: `mono ${classeDe(o.resultado)}` }, sinalDe(o.resultado)))))
+        : null,
+    );
+  }
+
+  async function carregar() {
+    const d = await api('GET', `/resultado?modo=${modo}`).catch(() => null);
+    if (!d) return;
+    const nova = JSON.stringify(d);
+    if (nova === assinatura) return; // nada mudou: não refaz (sem piscar)
+    assinatura = nova;
+    desenhar(d);
+  }
+  carregar();
+  return { el, carregar };
+}
+
+const TEXTO_SITUACAO = { executado: 'executado', rejeitado: 'recusado', ignorado: 'ignorado', erro: 'erro', alerta: 'aviso' };
+const CLASSE_SITUACAO = { executado: 'ok', rejeitado: 'alerta', ignorado: 'neutro', erro: 'perigo', alerta: 'ia' };
+
+/** O que está acontecendo agora: cada sinal e ordem entra no topo, sem recarregar a página. */
+function cartaoAoVivo() {
+  const lista = h('ol', { class: 'feed ao-vivo-lista', 'aria-live': 'polite' });
+  const quando = h('span', { class: 'suave ao-vivo-quando' }, 'conectando…');
+  let ultimoId = 0;
+  let atualizadoEm = 0;
+  const linha = (e, nova) => {
+    const ordem = e.ordem;
+    const lado = e.acao === 'comprar' ? 'compra' : 'venda';
+    return h('li', { class: `feed-item ${nova ? 'entrando' : ''} ${e.situacao === 'erro' ? 'feed-erro' : ''}`, 'data-quando': e.recebido_em },
+      seloLado(lado),
+      h('div', { class: 'feed-texto' },
+        h('strong', {}, `${e.simbolo ?? ''} · ${e.estrategia ?? 'estratégia apagada'}`),
+        h('span', { class: 'suave' }, ordem
+          ? `${ordem.modo === 'real' ? 'REAL' : 'simulação'}: ${fmt(Number(ordem.custo))} a ${precoCompacto(Number(ordem.preco))}`
+          : (e.motivo ?? e.motivo_sinal ?? '').slice(0, 110)),
+        h('span', { class: 'suave pequeno-texto quando-relativo' }, relativo(e.recebido_em))),
+      selo(TEXTO_SITUACAO[e.situacao] ?? e.situacao, CLASSE_SITUACAO[e.situacao] ?? 'neutro'));
+  };
+  const el = h('div', { class: 'cartao ao-vivo' },
+    h('div', { class: 'cartao-topo' },
+      h('div', {}, h('h2', {}, h('span', { class: 'ponto-vivo vivo' }), ' Ao vivo'), h('p', { class: 'suave' }, 'Sinais e ordens chegando, a cada poucos segundos')),
+      quando),
+    lista);
+  function atualizar(eventos) {
+    atualizadoEm = Date.now();
+    const novos = eventos.filter((e) => e.id > ultimoId).reverse();
+    const primeira = ultimoId === 0;
+    for (const e of novos) {
+      lista.prepend(linha(e, !primeira));
+      ultimoId = Math.max(ultimoId, e.id);
+    }
+    while (lista.children.length > 15) lista.lastElementChild.remove();
+    if (!lista.children.length) lista.replaceChildren(h('li', { class: 'suave ao-vivo-vazio' }, 'Nenhum sinal ainda. Os pilotos estão olhando o mercado.'));
+    else lista.querySelector('.ao-vivo-vazio')?.remove();
+  }
+  function tique() {
+    quando.textContent = atualizadoEm ? `atualizado há ${Math.max(0, Math.round((Date.now() - atualizadoEm) / 1000))} s` : 'conectando…';
+    for (const li of lista.querySelectorAll('[data-quando]')) {
+      const t = li.querySelector('.quando-relativo');
+      if (t) t.textContent = relativo(li.dataset.quando);
+    }
+  }
+  return { el, atualizar, tique };
+}
+
 export async function paginaPainel({ recarregar, agendar }) {
   const [r, diag] = await Promise.all([api('GET', '/resumo'), api('GET', '/diagnostico').catch(() => null)]);
   const serie = r.serie ?? [];
@@ -105,8 +259,34 @@ export async function paginaPainel({ recarregar, agendar }) {
   const ativas = r.estrategias.filter((e) => e.ativa).length;
   const emReal = r.estrategias.filter((e) => e.real && e.conta_modo === 'real' && r.real_no_servidor).length;
 
-  // atualiza sozinho enquanto a página está aberta
-  agendar(() => recarregar({ suave: true }), 30_000);
+  // ao vivo: os números e o feed a cada 5 s, o resultado e o diagnóstico a cada 30 s, sem recarregar
+  const vivos = new Map();
+  const resultado = cartaoResultado();
+  const aoVivo = cartaoAoVivo();
+  const caixaDiag = h('div', {}, diag && diag.grupos.length ? cartaoDiagnostico(diag) : null);
+  let assinaturaDiag = JSON.stringify(diag);
+  const atualizarVivo = async () => {
+    const d = await api('GET', '/ao-vivo').catch(() => null);
+    if (!d) return;
+    const novos = { ordens: Number(d.hoje.ordens), compras: Number(d.hoje.compras), vendas: Number(d.hoje.vendas), erros: Number(d.hoje.erros), exposicao: Number(d.exposicao.total) };
+    for (const [chave, valor] of Object.entries(novos)) {
+      const k = vivos.get(chave);
+      if (!k || k.valor === valor) continue;
+      animarPara(k.numero, k.valor, valor, k.formato);
+      k.valor = valor;
+    }
+    aoVivo.atualizar(d.eventos);
+  };
+  atualizarVivo();
+  agendar(atualizarVivo, 5_000);
+  agendar(() => aoVivo.tique(), 1_000);
+  agendar(() => resultado.carregar(), 30_000);
+  agendar(async () => {
+    const d = await api('GET', '/diagnostico').catch(() => null);
+    if (!d || JSON.stringify(d) === assinaturaDiag) return;
+    assinaturaDiag = JSON.stringify(d);
+    caixaDiag.replaceChildren(d.grupos.length ? cartaoDiagnostico(d) : '');
+  }, 30_000);
 
   const hoje = new Date(agora()).toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: FUSO });
 
@@ -119,14 +299,15 @@ export async function paginaPainel({ recarregar, agendar }) {
       ),
     ),
     h('div', { class: 'grade-kpi' }, escalonar([
-      kpi('Ordens hoje', r.hoje.ordens, { nomeIcone: 'ordens', formato: inteiro, serie: serie.map((d) => Number(d.ordens)), cor: 'var(--primaria)', nota: '14 dias' }),
-      kpi('Compras hoje', r.hoje.compras, { nomeIcone: 'compra', serie: serie.map((d) => Number(d.compras)), cor: 'var(--ok)', nota: 'moeda de cotação' }),
-      kpi('Vendas hoje', r.hoje.vendas, { nomeIcone: 'venda', serie: serie.map((d) => Number(d.vendas)), cor: 'var(--ciano)', nota: 'líquido de taxa' }),
-      kpi('Exposição aberta', exposicao, { nomeIcone: 'contas', nota: 'custo das posições' }),
-      kpi('Erros hoje', r.hoje.erros, { nomeIcone: 'alerta', formato: inteiro, classe: Number(r.hoje.erros) ? 'kpi-perigo' : '', nota: Number(r.hoje.erros) ? 'veja em Ordens' : 'nenhum' }),
+      kpi('Ordens hoje', r.hoje.ordens, { nomeIcone: 'ordens', formato: inteiro, serie: serie.map((d) => Number(d.ordens)), cor: 'var(--primaria)', nota: '14 dias', vivos, chave: 'ordens' }),
+      kpi('Compras hoje', r.hoje.compras, { nomeIcone: 'compra', serie: serie.map((d) => Number(d.compras)), cor: 'var(--ok)', nota: 'moeda de cotação', vivos, chave: 'compras' }),
+      kpi('Vendas hoje', r.hoje.vendas, { nomeIcone: 'venda', serie: serie.map((d) => Number(d.vendas)), cor: 'var(--ciano)', nota: 'líquido de taxa', vivos, chave: 'vendas' }),
+      kpi('Exposição aberta', exposicao, { nomeIcone: 'contas', nota: 'custo das posições', vivos, chave: 'exposicao' }),
+      kpi('Erros hoje', r.hoje.erros, { nomeIcone: 'alerta', formato: inteiro, classe: Number(r.hoje.erros) ? 'kpi-perigo' : '', nota: Number(r.hoje.erros) ? 'veja em Ordens' : 'nenhum', vivos, chave: 'erros' }),
     ])),
     cartaoParada(r, recarregar),
-    diag && diag.grupos.length ? cartaoDiagnostico(diag) : null,
+    h('div', { class: 'grade-2-1' }, resultado.el, aoVivo.el),
+    caixaDiag,
     h('div', { class: 'grade-2-1' }, escalonar([
       h('div', { class: 'cartao' },
         h('div', { class: 'cartao-topo' }, h('div', {}, h('h2', {}, 'Volume negociado'), h('p', { class: 'suave' }, 'Compras e vendas executadas por dia, últimos 14 dias')),
@@ -168,6 +349,6 @@ export async function paginaPainel({ recarregar, agendar }) {
           : vazio('Nenhuma ordem ainda', 'As ordens aparecem aqui assim que um sinal for executado.', 'ordens'),
       ),
     ], 4)),
-    h('p', { class: 'rodape-pagina suave' }, icone('relogio'), `Atualizado ${data(agora())} · atualiza sozinho a cada 30 s`),
+    h('p', { class: 'rodape-pagina suave' }, icone('relogio'), `Aberto ${data(agora())} · os números e o "Ao vivo" se atualizam sozinhos a cada 5 s`),
   ];
 }

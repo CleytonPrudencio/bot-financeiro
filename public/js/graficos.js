@@ -171,3 +171,88 @@ export function barraUso(usado, limite, rotulo, formatar = fmt) {
     h('div', { class: 'uso-trilho' }, h('div', { class: `uso-barra uso-${nivel}`, estilo: { '--fr': String(fr) } })),
   );
 }
+
+/**
+ * Ganho e perda por dia: barra verde (ganho) ou vermelha (perda) e a linha do acumulado, com dica ao
+ * passar o mouse. `dias` = [{dia: 'AAAA-MM-DD', resultado, operacoes, acumulado}]; `moeda` só no texto.
+ */
+export function graficoResultado(dias, moeda = '') {
+  const w = 640;
+  const hh = 230;
+  const m = { e: 52, d: 52, t: 14, b: 26 };
+  // duas escalas: as barras (resultado do dia, eixo da esquerda) e a linha do acumulado (eixo da
+  // direita); com uma só, o acumulado achata as barras do dia
+  const faixa = (valores) => {
+    let min = Math.min(0, ...valores);
+    let max = Math.max(0, ...valores);
+    if (max - min < 1e-9) {
+      max += 1;
+      min -= 1;
+    }
+    const folga = (max - min) * 0.12;
+    return [min - folga, max + folga];
+  };
+  const [bMin, bMax] = faixa(dias.map((d) => d.resultado));
+  const [aMin, aMax] = faixa(dias.map((d) => d.acumulado));
+  const y = escala(bMin, bMax, hh - m.b, m.t);
+  const yA = escala(aMin, aMax, hh - m.b, m.t);
+  const passo = (w - m.e - m.d) / Math.max(dias.length, 1);
+  const cx = (i) => m.e + passo * (i + 0.5);
+  const zero = y(0);
+  const largura = Math.max(3, passo * 0.62);
+
+  const grade = [0, 0.25, 0.5, 0.75, 1].map((f) => {
+    const v = bMin + (bMax - bMin) * f;
+    const vA = aMin + (aMax - aMin) * f;
+    return s('g', {}, s('line', { x1: m.e, x2: w - m.d, y1: y(v), y2: y(v), class: 'grade-linha' }),
+      s('text', { x: m.e - 8, y: y(v) + 4, class: 'grade-texto', 'text-anchor': 'end' }, fmt(v)),
+      s('text', { x: w - m.d + 8, y: yA(vA) + 4, class: 'grade-texto grade-acumulado', 'text-anchor': 'start' }, fmt(vA)));
+  });
+  const rotulos = dias.map((d, i) => (i % 5 === (dias.length - 1) % 5 ? s('text', { x: cx(i), y: hh - 6, class: 'grade-texto', 'text-anchor': 'middle' }, `${d.dia.slice(8, 10)}/${d.dia.slice(5, 7)}`) : null));
+  const barras = dias.map((d, i) => {
+    if (!d.operacoes) return null;
+    const topo = Math.min(y(d.resultado), zero);
+    const altura = Math.max(1.5, Math.abs(y(d.resultado) - zero));
+    return s('rect', { class: `barra-resultado ${d.resultado >= 0 ? 'ganho' : 'perda'}`, x: cx(i) - largura / 2, y: topo, width: largura, height: altura, rx: 3 });
+  });
+  const linha = caminhoSuave(dias.map((d, i) => [cx(i), yA(d.acumulado)]));
+  const guia = s('line', { class: 'guia', y1: m.t, y2: hh - m.b, x1: -10, x2: -10 });
+  const ponto = s('circle', { class: 'ponto ponto-acumulado', r: 4.5, cx: -10, cy: -10 });
+  const dica = h('div', { class: 'dica-grafico', hidden: true });
+  const svg = s('svg', { class: 'grafico-area grafico-resultado', viewBox: `0 0 ${w} ${hh}`, role: 'img', 'aria-label': `Ganho e perda por dia nos últimos ${dias.length} dias${moeda ? ` em ${moeda}` : ''}` },
+    grade,
+    s('line', { x1: m.e, x2: w - m.d, y1: zero, y2: zero, class: 'linha-zero' }),
+    rotulos,
+    barras,
+    s('path', { class: 'traco-anima', d: linha, fill: 'none', stroke: 'var(--primaria)', 'stroke-width': 2.2, pathLength: 1 }),
+    guia,
+    ponto);
+  const caixa = h('div', { class: 'grafico-caixa' }, svg, dica);
+  svg.addEventListener('pointermove', (ev) => {
+    const r = svg.getBoundingClientRect();
+    const px = ((ev.clientX - r.left) / r.width) * w;
+    const i = Math.max(0, Math.min(dias.length - 1, Math.floor((px - m.e) / passo)));
+    const d = dias[i];
+    if (!d) return;
+    guia.setAttribute('x1', cx(i));
+    guia.setAttribute('x2', cx(i));
+    ponto.setAttribute('cx', cx(i));
+    ponto.setAttribute('cy', yA(d.acumulado));
+    caixa.classList.add('com-guia');
+    dica.hidden = false;
+    const sinal = (v) => `${v > 0 ? '+' : ''}${fmt(v)}`;
+    dica.replaceChildren(
+      h('strong', {}, `${d.dia.slice(8, 10)}/${d.dia.slice(5, 7)}`),
+      h('span', { class: `dica-linha ${d.resultado > 0 ? 'positivo' : d.resultado < 0 ? 'negativo' : ''}` }, `No dia: ${sinal(d.resultado)} ${moeda}`),
+      h('span', { class: 'dica-linha' }, `Acumulado: ${sinal(d.acumulado)}`),
+      h('span', { class: 'dica-linha suave' }, `${d.operacoes} operação(ões)`),
+    );
+    const esquerda = (cx(i) / w) * r.width;
+    dica.style.setProperty('left', `${Math.min(r.width - 150, Math.max(0, esquerda - 70))}px`);
+  });
+  svg.addEventListener('pointerleave', () => {
+    caixa.classList.remove('com-guia');
+    dica.hidden = true;
+  });
+  return caixa;
+}
