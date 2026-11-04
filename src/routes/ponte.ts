@@ -48,7 +48,8 @@ const esquema = z.object({
       z.object({
         id: z.number().int().positive(),
         ok: z.boolean(),
-        preco: numero.positive().optional(),
+        // a Genial devolve preço 0 na ordem a mercado (o preço sai depois): aceita e usa o de referência
+        preco: numero.min(0).nullable().optional(),
         quantidade: numero.min(0).optional(),
         id_exchange: z.string().max(80).nullable().optional(),
         erro: z.string().max(500).optional(),
@@ -63,7 +64,7 @@ const esquema = z.object({
  * "pegou e não respondeu"). Se a corretora executou, a ordem e a posição passam a valer agora: senão a
  * ação ficava comprada no MetaTrader sem o bot saber (sem stop, sem alvo). Devolve true se tratou.
  */
-async function conciliarAtrasada(contaId: number, r: { id: number; ok: boolean; preco?: number | undefined; quantidade?: number | undefined; id_exchange?: string | null | undefined; erro?: string | undefined }): Promise<boolean> {
+async function conciliarAtrasada(contaId: number, r: { id: number; ok: boolean; preco?: number | null | undefined; quantidade?: number | undefined; id_exchange?: string | null | undefined; erro?: string | undefined }): Promise<boolean> {
   const [cmd] = await query<{ dados: { lado: 'compra' | 'venda'; simbolo: string; preco_ref: number }; criado_em: Date }>(
     `select dados, criado_em from mt5_comandos where id = $1 and conta_id = $2 and situacao = 'erro' and (resultado->>'sem_resposta')::boolean`,
     [r.id, contaId],
@@ -77,7 +78,7 @@ async function conciliarAtrasada(contaId: number, r: { id: number; ok: boolean; 
     return true;
   }
   const quantidade = Number(r.quantidade);
-  const preco = Number(r.preco ?? cmd.dados.preco_ref);
+  const preco = Number(r.preco) > 0 ? Number(r.preco) : Number(cmd.dados.preco_ref);
   // a corretora executou: o log é a prova, antes de qualquer gravação
   logger.info({ comando: r.id, conta: contaId, ...cmd.dados, quantidade, preco, id_exchange: r.id_exchange ?? null }, 'ordem executada (resposta atrasada da ponte MT5)');
   const [ordem] = await query<{ id: number; estrategia_id: number; sinal_id: number | null }>(
@@ -135,6 +136,13 @@ ponte.post(
       );
     }
     for (const r of d.resultados ?? []) {
+      // quem espera a resposta desiste em 60 s: passou de 70 s, ninguém mais está esperando, e a
+      // resposta precisa ser conciliada (senão a ordem executada some do bot)
+      await query(
+        `update mt5_comandos set situacao = 'erro', resultado = $3, terminado_em = now()
+          where id = $1 and conta_id = $2 and situacao = 'enviado' and enviado_em < now() - interval '70 seconds'`,
+        [r.id, conta.id, JSON.stringify({ ok: false, sem_resposta: true, erro: 'a ponte não respondeu a tempo' })],
+      );
       const feito = await query(
         `update mt5_comandos set situacao = $3, resultado = $4, terminado_em = now()
           where id = $1 and conta_id = $2 and situacao = 'enviado' returning id`,

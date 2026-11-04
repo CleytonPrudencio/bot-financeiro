@@ -23,7 +23,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSAO = "1.2"
+VERSAO = "1.3"
 MAGIC = 50501  # marca as ordens do bot no MetaTrader
 LOTE_PADRAO = 100  # na B3, lote padrão de ações; abaixo disso, mercado fracionário (código + "F")
 IDADE_MAX_S = 20
@@ -215,7 +215,8 @@ class MetaTrader:
             raise RuntimeError(f"o MetaTrader não respondeu: {mt5.last_error()}")
         if r.retcode not in (mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_DONE_PARTIAL):
             raise RuntimeError(f"corretora recusou ({r.retcode}): {r.comment}")
-        return float(r.volume), float(r.price or pedido["price"]), str(r.order)
+        # na B3, a ordem a mercado pode voltar com price 0 (o preço sai depois): usa o do pedido
+        return float(r.volume), float(r.price or pedido["price"] or 0), str(r.order)
 
     def _fechamento(self, cmd):
         """Conta hedge: a venda fecha as posições compradas, pelo número de cada uma."""
@@ -244,7 +245,10 @@ class MetaTrader:
         quantidade, preco = preco_medio(execucoes)
         if quantidade <= 0:
             raise RuntimeError("nenhuma parte da ordem foi executada")
-        return {"preco": preco, "quantidade": quantidade, "id_exchange": ",".join(ids)}
+        r = {"quantidade": quantidade, "id_exchange": ",".join(ids)}
+        if preco > 0:
+            r["preco"] = preco  # sem preço, o bot usa o de referência da ordem
+        return r
 
 
 # ------------------------------------------------------------------ laço
@@ -298,7 +302,7 @@ def principal():
                     continue
                 try:
                     r = mt.executar(cmd)
-                    log.info("ordem %s: %s %s %s a %.2f", cmd["id"], cmd["lado"], r["quantidade"], cmd["simbolo"], r["preco"])
+                    log.info("ordem %s: %s %s %s a %.2f", cmd["id"], cmd["lado"], r["quantidade"], cmd["simbolo"], r.get("preco", cmd.get("preco_ref") or 0))
                     resultados.append({"id": cmd["id"], "ok": True, **r})
                 except Exception as e:  # noqa: BLE001 - qualquer recusa volta para o bot como erro
                     log.error("ordem %s falhou: %s", cmd.get("id"), e)

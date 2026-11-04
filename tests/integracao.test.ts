@@ -570,6 +570,21 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     const [posicao] = await db.query<{ quantidade: number }>('select quantidade from posicoes where estrategia_id = $1', [estId]);
     expect(Number(posicao!.quantidade)).toBe(5);
     await db.query('delete from posicoes where estrategia_id = $1', [estId]);
+
+    // preço 0 (ordem a mercado da B3) não trava a ponte; a resposta de uma ordem "enviada" há mais de
+    // 70 s (o bot já desistiu, como antes da conciliação existir) também é conciliada
+    const [velhaEnviada] = await db.query<{ id: number }>(
+      `insert into mt5_comandos (conta_id, dados, situacao, criado_em, enviado_em)
+       values ($1, '{"lado":"compra","simbolo":"LREN3/BRL","quantidade":5,"preco_ref":16}', 'enviado', now() - interval '3 minutes', now() - interval '3 minutes')
+       returning id`, [c.corpo.id]);
+    const [ordemVelha] = await db.query<{ id: number }>(
+      `insert into ordens (estrategia_id, conta_id, modo, simbolo, lado, quantidade, preco_medio, custo, situacao, erro, criada_em)
+       values ($1, $2, 'real', 'LREN3/BRL', 'compra', 0, 0, 0, 'erro', $3, now() - interval '2 minutes') returning id`,
+      [estId, c.corpo.id, `${SEM_RESPOSTA}: confira no MetaTrader se ela foi executada`]);
+    expect((await sincronizar({ resultados: [{ id: velhaEnviada!.id, ok: true, preco: 0, quantidade: 5, id_exchange: '778' }] })).status).toBe(200);
+    const [velhaConciliada] = await db.query<{ situacao: string; preco_medio: number }>('select situacao, preco_medio from ordens where id = $1', [ordemVelha!.id]);
+    expect(velhaConciliada).toMatchObject({ situacao: 'executada', preco_medio: 16 });
+    await db.query('delete from posicoes where estrategia_id = $1', [estId]);
   });
 
   it('assistente B3: conta sem chave, cotação do Yahoo, Telegram pareado e avisos confirmados pelo dono', async () => {

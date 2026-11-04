@@ -75,7 +75,7 @@ export async function observarMt5(): Promise<{ simbolos: string[]; tempos: Tempo
 
 export interface ResultadoOrdem {
   ok: boolean;
-  preco?: number;
+  preco?: number | null;
   quantidade?: number;
   id_exchange?: string | null;
   erro?: string;
@@ -134,7 +134,8 @@ export class CorretoraMt5 implements Corretora {
       if (c.situacao === 'feito' && c.resultado?.ok) {
         const r = c.resultado;
         const quantidade = Number(r.quantidade ?? 0);
-        const preco = Number(r.preco ?? dados.preco_ref);
+        // preço 0: a corretora ainda não informou (ordem a mercado na B3); vale o de referência
+        const preco = Number(r.preco) > 0 ? Number(r.preco) : dados.preco_ref;
         return { quantidade, precoMedio: preco, custo: quantidade * preco, taxa: 0, idExchange: r.id_exchange ?? null };
       }
       if (c.situacao === 'erro' || c.situacao === 'feito') throw new Error(`MT5: ${c.resultado?.erro ?? 'a corretora recusou a ordem'}`.slice(0, 300));
