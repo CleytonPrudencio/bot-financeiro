@@ -17,7 +17,8 @@ export interface EstadoRisco {
     simbolo: string;
     valor_ordem: number;
     limite_por_ordem: number;
-    limite_diario: number;
+    /** null = sem teto para a soma das compras do dia */
+    limite_diario: number | null;
     limite_posicao: number | null;
     intervalo_min_seg: number;
     desvio_max_pct: number;
@@ -84,7 +85,7 @@ export function avaliar(sinal: Sinal, e: EstadoRisco): Decisao {
   if (sinal.acao === 'comprar') {
     const valor = sinal.valor ?? est.valor_ordem;
     if (valor > est.limite_por_ordem) return nao(`valor ${valor} acima do limite por ordem (${est.limite_por_ordem})`);
-    if (e.gastoHoje + valor > est.limite_diario) {
+    if (est.limite_diario !== null && e.gastoHoje + valor > est.limite_diario) {
       return nao(`limite diário: já comprou ${e.gastoHoje} hoje, mais ${valor} passa de ${est.limite_diario}`);
     }
     if (est.limite_posicao !== null && e.posicao.custo_total + valor > est.limite_posicao) {

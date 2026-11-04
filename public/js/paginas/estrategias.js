@@ -53,7 +53,7 @@ function formEstrategia({ e = {}, contas, ias, aoSalvar }) {
     secao('Valores e limites',
       campo('Valor por ordem', { name: 'valor_ordem', type: 'number', step: 'any', min: '0', required: true, value: e.valor_ordem }, 'em moeda de cotação (USDT, BRL)'),
       campo('Limite por ordem', { name: 'limite_por_ordem', type: 'number', step: 'any', min: '0', required: true, value: e.limite_por_ordem }),
-      campo('Limite de compras por dia', { name: 'limite_diario', type: 'number', step: 'any', min: '0', required: true, value: e.limite_diario }),
+      campo('Limite de compras por dia', { name: 'limite_diario', type: 'number', step: 'any', min: '0', value: e.limite_diario ?? '', placeholder: 'sem limite' }, 'soma das compras do dia; vazio = sem limite (o dinheiro que volta na venda pode girar de novo)'),
       campo('Limite da posição aberta', { name: 'limite_posicao', type: 'number', step: 'any', min: '0', value: e.limite_posicao }, 'opcional'),
     ),
     secao('Segurança',
@@ -72,7 +72,7 @@ function formEstrategia({ e = {}, contas, ias, aoSalvar }) {
         escolha('Velas que o piloto lê', 'auto_tempo', [['1m', '1 minuto'], ['5m', '5 minutos'], ['15m', '15 minutos'], ['1h', '1 hora'], ['4h', '4 horas'], ['1d', '1 dia']], e.auto_tempo ?? '1d', 'sempre a última vela fechada'),
         campo('Olhar o mercado a cada (min)', { name: 'auto_intervalo_min', type: 'number', min: '1', max: '1440', value: e.auto_intervalo_min ?? 2 }),
         campo('Volume mínimo do par em 24 h', { name: 'auto_volume_min', type: 'number', step: 'any', min: '0', value: e.auto_volume_min ?? 500000 }, 'na moeda de cotação; só vale na varredura'),
-        campo('Consultas à IA por dia (máximo)', { name: 'auto_max_ia_dia', type: 'number', min: '0', max: '100', value: e.auto_max_ia_dia ?? 10 }, 'cada compra proposta passa pelo agente e custa créditos'),
+        campo('Consultas à IA por dia (máximo)', { name: 'auto_max_ia_dia', type: 'number', min: '0', max: '1000', value: e.auto_max_ia_dia ?? '', placeholder: 'sem limite' }, 'cada compra proposta passa pelo agente e custa créditos; vazio = sem limite'),
       ),
       h('div', { class: 'campos' },
         campo('Stop de perda (%)', { name: 'auto_stop_pct', type: 'number', step: '0.1', min: '0.1', max: '50', value: e.auto_stop_pct ?? 3 }, 'queda desde a compra que fecha a posição'),
@@ -140,7 +140,9 @@ function cartaoEstrategia(e, { resumo, ias, recarregar }) {
       h('div', {}, h('span', { class: 'suave' }, 'Custo'), h('strong', { class: 'mono' }, fmt(e.custo_posicao))),
       h('div', {}, h('span', { class: 'suave' }, 'Por ordem'), h('strong', { class: 'mono' }, fmt(e.valor_ordem))),
     ),
-    barraUso(Number(e.gasto_hoje ?? 0), Number(e.limite_diario), 'Compras hoje / limite diário'),
+    e.limite_diario === null || e.limite_diario === undefined
+      ? h('p', { class: 'pequeno-texto suave' }, `Compras hoje: ${fmt(Number(e.gasto_hoje ?? 0))} · sem limite diário`)
+      : barraUso(Number(e.gasto_hoje ?? 0), Number(e.limite_diario), 'Compras hoje / limite diário'),
     h('div', { class: 'acoes acoes-ordem' },
       botao('Comprar', { classe: 'pequeno', nomeIcone: 'compra', onclick: () => comprarAgora(e, real, recarregar) }),
       botao('Vender tudo', { classe: 'pequeno secundario', nomeIcone: 'venda', disabled: !(Number(e.posicao) > 0), onclick: () => venderAgora(e, real, recarregar) })),
@@ -232,7 +234,7 @@ function todasAsMoedas(contas, recarregar) {
       }
     },
   },
-  h('p', { class: 'suave' }, 'Cria uma estratégia de piloto para cada par da moeda com volume (ex.: tudo em BRL) ou, na conta MetaTrader 5, para cada ação que a ponte acompanha (as ~50 mais negociadas da B3). Cada uma tem posição própria: velas de 1 min e no máximo 10 consultas à IA por dia. Repique: alvo +1,5% e stop -1%; tendência: alvo +3% e stop -1,5%. Todas nascem em simulação; as que já existem ficam como estão.'),
+  h('p', { class: 'suave' }, 'Cria uma estratégia de piloto para cada par da moeda com volume (ex.: tudo em BRL) ou, na conta MetaTrader 5, para cada ação que a ponte acompanha (as ~50 mais negociadas da B3). Cada uma tem posição própria: velas de 1 min, sem limite de consultas à IA nem de compras no dia. Repique: alvo +1,5% e stop -1%; tendência: alvo +3% e stop -1,5%. Todas nascem em simulação; as que já existem ficam como estão.'),
   h('div', { class: 'campos' },
     escolha('Conta', 'conta_id', contas.map((c) => [c.id, `${c.nome} (${c.exchange})`]), contas[0]?.id),
     campo('Moeda de cotação', { name: 'moeda', value: 'BRL', required: true }),

@@ -192,7 +192,7 @@ async function cuidar(e: EstrategiaPiloto, agora: number): Promise<void> {
   if (!pares.length) return situacao(e.id, `nenhum par em ${moeda} na ${e.exchange} com volume de 24 h acima de ${e.auto_volume_min}`);
 
   const consultas = await consultasDeHoje(e.id);
-  if (consultas >= e.auto_max_ia_dia) {
+  if (e.auto_max_ia_dia !== null && consultas >= e.auto_max_ia_dia) {
     return situacao(e.id, `já consultou a IA ${consultas} vez(es) hoje, o limite da estratégia: volta a procurar amanhã (o stop segue valendo)`);
   }
 
@@ -425,7 +425,8 @@ export interface OpcoesPiloto {
   estilo?: 'tendencia' | 'repique';
   contexto?: string;
   valor?: number;
-  maxIaDia?: number;
+  /** null = sem teto de consultas à IA por dia */
+  maxIaDia?: number | null;
   stop?: number;
   alvo?: number;
   protecao?: number;
@@ -447,12 +448,12 @@ export async function criarPilotoPadrao(contaId: number, nome: string, simbolo: 
                               ia_modo, ia_tipo, ia_falha, ia_confianca_min, ia_nas_vendas, ia_contexto,
                               auto_ligado, auto_stop_pct, auto_alvo_pct, auto_protecao_pct, auto_recuo_pct,
                               auto_varrer, auto_tempo, auto_intervalo_min, auto_exigir_virada, auto_max_ia_dia, auto_estilo, auto_stop_atr)
-     values ($1, $2, $3, true, false, $4, $5, $6, $6, $6, $6, $7, $8,
+     values ($1, $2, $3, true, false, $4, $5, $6, $6, null, $6, $7, $8,
              'obrigatorio', 'agente', 'reprova', 0.6, false, $9,
              true, $10, $11, $12, $13, $16, $14, $15, false, $17, $18, $19) returning id`,
     [nome, contaId, simbolo, t.hash, t.prefixo, valor, PADRAO.intervalo_min_seg, PADRAO.desvio_max_pct,
       opcoes.contexto ?? PADRAO.ia_contexto, opcoes.stop ?? PADRAO.stop, opcoes.alvo ?? PADRAO.alvo, opcoes.protecao ?? PADRAO.protecao, opcoes.recuo ?? PADRAO.recuo,
-      opcoes.tempo ?? PADRAO.tempo, opcoes.intervaloMin ?? PADRAO.intervalo_min, opcoes.varrer ?? true, opcoes.maxIaDia ?? 10, opcoes.estilo ?? 'tendencia',
+      opcoes.tempo ?? PADRAO.tempo, opcoes.intervaloMin ?? PADRAO.intervalo_min, opcoes.varrer ?? true, opcoes.maxIaDia === undefined ? null : opcoes.maxIaDia, opcoes.estilo ?? 'tendencia',
       opcoes.stopAtr ?? false],
   );
   await query(
@@ -463,7 +464,7 @@ export async function criarPilotoPadrao(contaId: number, nome: string, simbolo: 
 }
 
 /** Valores das estratégias "uma por moeda": velas de 1 min, stop curto, pouca IA por moeda (custo). */
-export const POR_MOEDA: OpcoesPiloto = { tempo: '1m', intervaloMin: 1, varrer: false, valor: 15, maxIaDia: 10, stop: 1.5, alvo: 3, protecao: 1.2, recuo: 0.6, stopAtr: true };
+export const POR_MOEDA: OpcoesPiloto = { tempo: '1m', intervaloMin: 1, varrer: false, valor: 15, maxIaDia: null, stop: 1.5, alvo: 3, protecao: 1.2, recuo: 0.6, stopAtr: true };
 
 /** O mesmo, no estilo repique: alvo e stop curtos e o agente sabendo que comprar na queda é o plano. */
 export const POR_MOEDA_REPIQUE: OpcoesPiloto = {

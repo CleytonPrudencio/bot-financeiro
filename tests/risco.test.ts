@@ -78,6 +78,11 @@ describe('avaliar', () => {
     expect(avaliar({ acao: 'comprar', valor: 200 }, estado())).toMatchObject({ aprovado: true });
   });
 
+  it('sem limite diário (null): a soma do dia não barra; o limite por ordem continua', () => {
+    expect(avaliar(comprar, estado({ gastoHoje: 10_000 }, { limite_diario: null }))).toMatchObject({ aprovado: true });
+    expect(avaliar({ acao: 'comprar', valor: 300 }, estado({}, { limite_diario: null }))).toMatchObject({ aprovado: false });
+  });
+
   it('limite diário conta o que já foi comprado hoje', () => {
     expect(avaliar(comprar, estado({ gastoHoje: 400 }))).toMatchObject({ aprovado: true });
     expect(avaliar(comprar, estado({ gastoHoje: 401 }))).toMatchObject({ aprovado: false });

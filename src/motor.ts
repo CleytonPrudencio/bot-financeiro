@@ -43,7 +43,7 @@ export interface Estrategia {
   real: boolean;
   valor_ordem: number;
   limite_por_ordem: number;
-  limite_diario: number;
+  limite_diario: number | null;
   limite_posicao: number | null;
   intervalo_min_seg: number;
   desvio_max_pct: number;
@@ -68,7 +68,7 @@ export interface Estrategia {
   auto_tempo: '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
   auto_intervalo_min: number;
   auto_volume_min: number;
-  auto_max_ia_dia: number;
+  auto_max_ia_dia: number | null;
   auto_varrido_em: Date | null;
   auto_exigir_virada: boolean;
   auto_estilo: 'tendencia' | 'repique';

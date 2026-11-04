@@ -523,7 +523,8 @@ const esquemaEstrategia = z
     real: z.boolean().default(false),
     valor_ordem: valor,
     limite_por_ordem: valor,
-    limite_diario: valor,
+    // null = sem teto para a soma das compras do dia
+    limite_diario: valor.nullable().default(null),
     limite_posicao: valor.nullable().default(null),
     intervalo_min_seg: z.number().int().min(0).max(86_400).default(60),
     desvio_max_pct: z.number().min(0.01).max(50).default(1),
@@ -547,7 +548,8 @@ const esquemaEstrategia = z
     auto_tempo: z.enum(['1m', '5m', '15m', '1h', '4h', '1d']).default('1d'),
     auto_intervalo_min: z.number().int().min(1).max(1440).default(2),
     auto_volume_min: z.number().min(0).default(500_000),
-    auto_max_ia_dia: z.number().int().min(0).max(100).default(10),
+    // null = sem teto de consultas à IA por dia
+    auto_max_ia_dia: z.number().int().min(0).max(1000).nullable().default(null),
     auto_exigir_virada: z.boolean().default(true),
     auto_estilo: z.enum(['tendencia', 'repique']).default('tendencia'),
     // stop pela volatilidade (ATR x multiplicador) em vez do stop fixo
@@ -555,9 +557,9 @@ const esquemaEstrategia = z
     auto_stop_atr_mult: z.number().min(0.5).max(20).default(3),
   });
 
-function conferirLimites(e: { valor_ordem: number; limite_por_ordem: number; limite_diario: number }): void {
+function conferirLimites(e: { valor_ordem: number; limite_por_ordem: number; limite_diario: number | null }): void {
   if (e.valor_ordem > e.limite_por_ordem) throw new ErroPedido('o valor da ordem não pode passar do limite por ordem');
-  if (e.limite_por_ordem > e.limite_diario) throw new ErroPedido('o limite por ordem não pode passar do limite diário');
+  if (e.limite_diario !== null && e.limite_por_ordem > e.limite_diario) throw new ErroPedido('o limite por ordem não pode passar do limite diário');
 }
 
 async function conferirSimbolo(exchange: string, simbolo: string): Promise<void> {
