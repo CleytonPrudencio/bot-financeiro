@@ -166,3 +166,27 @@ export function resumoTecnico(velas: Vela[], referencia?: number[]) {
     ultimas_5_velas: velas.slice(-5).map((c) => ({ dia: new Date(c.t).toISOString().slice(0, 10), abre: r2(c.abre), max: r2(c.max), min: r2(c.min), fecha: r2(c.fecha) })),
   };
 }
+
+/**
+ * Os mesmos indicadores nas velas do tempo da estratégia (1 min, 15 min...): é neles que o piloto viu
+ * o sinal. O ATR aqui é por vela, para comparar com o stop da operação.
+ */
+export function resumoCurto(velas: Vela[], tempo: string) {
+  const f = velas.map((c) => c.fecha);
+  const md = macd(f);
+  const atual = ifr(f);
+  const anterior = ifr(f.slice(0, -1));
+  return {
+    tempo_das_velas: tempo,
+    velas: f.length,
+    preco: r2(f[f.length - 1] ?? null),
+    ifr_14: r2(atual),
+    ifr_14_vela_anterior: r2(anterior),
+    media_20: r2(mediaSimples(f, 20)),
+    media_50: r2(mediaSimples(f, 50)),
+    macd_histograma: md ? r2(md.histograma) : null,
+    atr_14_por_vela_pct: r2(atrPct(velas)),
+    variacao_ultimas_10_velas_pct: r2(retornoPct(f, 10)),
+    ultimas_5_velas: velas.slice(-5).map((c) => ({ hora: new Date(c.t).toISOString().slice(0, 16), abre: r2(c.abre), max: r2(c.max), min: r2(c.min), fecha: r2(c.fecha) })),
+  };
+}

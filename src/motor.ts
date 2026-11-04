@@ -8,7 +8,7 @@ import { consultarIas, type ConectorIa, type PedidoParecer, type RespostaIa } fr
 import { dadosParaAgente, gravarExecucao, lerConfig, previsaoLigada, rodarAgente, type ResultadoAgente } from './agente/index.js';
 import { lerSinal, type Sinal } from './sinal.js';
 import { CorretoraCcxt } from './brokers/ccxt.js';
-import { B3, cotacaoPublica, MT5 } from './brokers/mercado.js';
+import { B3, cotacaoPublica, MT5, type TempoVela } from './brokers/mercado.js';
 import { CorretoraAssistida } from './brokers/b3.js';
 import { agendarAviso, avisoEmAberto, criarAlerta } from './assistente/index.js';
 import { CorretoraMt5 } from './brokers/mt5.js';
@@ -285,11 +285,17 @@ export async function processarSinalDa(estrategiaId: number, corpo: unknown, ip:
         gasto_hoje: parcial.gastoHoje,
         limite_diario: est.limite_diario,
         ...(est.auto_ligado ? { estilo: est.auto_estilo } : {}),
+        // o porquê do piloto (ex.: "repique: IFR saiu de 24 e a vela fechou em alta"), como informação
+        ...(ip === 'piloto' && typeof (corpo as { motivo?: unknown })?.motivo === 'string'
+          ? { extras: { motivo_do_piloto: String((corpo as { motivo: string }).motivo).slice(0, 300), tempo_das_velas: est.auto_tempo } }
+          : {}),
       };
       if (est.ia_tipo === 'agente') {
         const todos = (await c.query<ConectorIa>('select * from conectores_ia where ativo')).rows;
         const config = await lerConfig((sql, p) => c.query(sql, p).then((r) => r.rows));
-        execucaoAgente = await rodarAgente({ pedido, dados: await dadosParaAgente(conta.exchange, est.simbolo, previsaoLigada(config)), config, conectores: todos });
+        // os indicadores também no tempo da estratégia do piloto, onde o sinal foi visto
+        const tempo = est.auto_ligado ? (est.auto_tempo as TempoVela) : undefined;
+        execucaoAgente = await rodarAgente({ pedido, dados: await dadosParaAgente(conta.exchange, est.simbolo, previsaoLigada(config), tempo), config, conectores: todos });
         pareceres = [execucaoAgente.final];
       } else {
         pareceres = await consultarIas(await conectoresDa(c, est), pedido);

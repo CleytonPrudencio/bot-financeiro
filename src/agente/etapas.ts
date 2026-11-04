@@ -108,7 +108,7 @@ const dataDeHoje = (d: Date) => d.toLocaleDateString('pt-BR', { timeZone: 'Ameri
 
 // O repique compra de propósito o que caiu demais: sem saber disso, a análise técnica e a decisão
 // davam "contra" só pela tendência de baixa, e o agente vetava toda entrada do estilo.
-const NOTA_REPIQUE = `Esta ordem vem de uma estratégia de REPIQUE: ela compra de propósito um ativo que caiu demais (IFR baixo) quando a vela volta a subir, para um ganho curto, com stop curto já definido. Queda recente e tendência de baixa são o cenário esperado, não motivo para ser contra sozinhas. Avalie se a queda parece exagero que tende a voltar (vendido demais, sem notícia grave, sem queda descontrolada) ou se há risco claro de continuar caindo forte.`;
+const NOTA_REPIQUE = `Esta ordem vem de uma estratégia de REPIQUE: ela compra de propósito um ativo que caiu demais (IFR baixo) quando a vela volta a subir, para um ganho curto, com stop curto já definido. Queda recente e tendência de baixa são o cenário esperado, não motivo para ser contra sozinhas. Avalie se a queda parece exagero que tende a voltar (vendido demais, sem notícia grave, sem queda descontrolada) ou se há risco claro de continuar caindo forte. O gatilho do repique (IFR abaixo de 30 e a vela de volta) é medido nas velas do tempo da estratégia, que vêm em "velas_da_estrategia" nos dados (ex.: velas de 1 min); os indicadores diários mostram só o contexto maior e não precisam ter IFR baixo. Compare o stop com o ATR por vela da estratégia, não com o ATR diário.`;
 
 export function sistemaDaEtapa(e: Etapa, temWeb: boolean, hoje = new Date(), estilo?: 'tendencia' | 'repique'): string {
   // Sem a data e sem uma ordem clara, o modelo achava que os dados bastavam e não pesquisava.

@@ -2,6 +2,7 @@ import type pg from 'pg';
 import { query } from '../db.js';
 import { logger } from '../logger.js';
 import { dadosDeMercado } from '../analise/index.js';
+import type { TempoVela } from '../brokers/mercado.js';
 import { chamarIa, mensagemDeErro, type ConectorIa, type PedidoParecer, type RespostaIa, type UsoWeb } from '../ia/index.js';
 import { ESQUEMA_PARECER, lerParecer } from '../ia/prompt.js';
 import { ESQUEMA_ETAPA, ETAPAS, ETAPAS_DE_APOIO, etapaDaPrevisao, lerEtapa, relatorios, sistemaDaEtapa, sistemaDecisao, type IdEtapa, type ResultadoEtapa } from './etapas.js';
@@ -134,10 +135,10 @@ export async function rodarAgente({ pedido, dados, config, conectores, aoAtualiz
 }
 
 /** Dados de mercado para o agente (com a previsão do Kronos, se a etapa estiver ligada); sem exchange ou com erro, segue sem eles. */
-export async function dadosParaAgente(exchange: string | null, simbolo: string, previsao = false): Promise<unknown> {
+export async function dadosParaAgente(exchange: string | null, simbolo: string, previsao = false, tempo?: TempoVela): Promise<unknown> {
   if (!exchange || !simbolo.includes('/')) return null;
   try {
-    return await dadosDeMercado(exchange, simbolo, { previsao });
+    return await dadosDeMercado(exchange, simbolo, { previsao, ...(tempo ? { tempo } : {}) });
   } catch (e) {
     return { erro: (e as Error).message.slice(0, 200) };
   }

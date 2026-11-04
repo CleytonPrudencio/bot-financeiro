@@ -1,9 +1,9 @@
 import { query } from '../db.js';
 import { logger } from '../logger.js';
-import { ehB3, velasDiarias } from '../brokers/mercado.js';
+import { ehB3, MS_DA_VELA, velas as velasDe, velasDiarias, type TempoVela } from '../brokers/mercado.js';
 import { chamarIa, mensagemDeErro, type ConectorIa } from '../ia/index.js';
 import { AGENTES, ESQUEMA_AGENTE, sistemaDoAgente, type Agente } from './agentes.js';
-import { resumoTecnico } from './indicadores.js';
+import { resumoCurto, resumoTecnico } from './indicadores.js';
 import { kronosLigado, preverKronos, resumoParaIa } from '../previsao/kronos.js';
 import { conceito, lerAgente, notaComposta, type ResultadoAgente } from './nota.js';
 
@@ -25,7 +25,7 @@ export interface PedidoAnalise {
  * Indicadores das velas diárias da exchange (null sem exchange) e, se o Kronos estiver no ar, a
  * previsão dele para os próximos 5 dias. Lança se a exchange falhar; o Kronos falhando só vira aviso.
  */
-export async function dadosDeMercado(exchange: string | null, simbolo: string, opcoes: { previsao?: boolean } = {}) {
+export async function dadosDeMercado(exchange: string | null, simbolo: string, opcoes: { previsao?: boolean; tempo?: TempoVela } = {}) {
   if (!exchange) return null;
   const velas = await velasDiarias(exchange, simbolo);
   if (velas.length < 30) throw new Error(`a ${exchange} devolveu só ${velas.length} velas de ${simbolo}`);
@@ -37,7 +37,15 @@ export async function dadosDeMercado(exchange: string | null, simbolo: string, o
       .then((v) => v.map((c) => c.fecha))
       .catch(() => undefined);
   }
-  const dados: Record<string, unknown> = { exchange, simbolo, ...resumoTecnico(velas, referencia) };
+  const dados: Record<string, unknown> = { exchange, simbolo, tempo_dos_indicadores: '1d (velas diárias: o contexto maior)', ...resumoTecnico(velas, referencia) };
+  // o piloto vê o sinal nas velas do tempo da estratégia: sem elas, o agente media o gatilho no
+  // gráfico diário (IFR 54 "longe de 30") e vetava toda entrada de repique em 1 min
+  if (opcoes.tempo && opcoes.tempo !== '1d') {
+    const duracao = MS_DA_VELA[opcoes.tempo];
+    const curtas = await velasDe(exchange, simbolo, opcoes.tempo, 200).catch(() => null);
+    const fechadas = curtas?.filter((v) => v.t + duracao <= Date.now()) ?? [];
+    if (fechadas.length >= 30) dados.velas_da_estrategia = resumoCurto(fechadas, opcoes.tempo);
+  }
   if (opcoes.previsao !== false && kronosLigado()) {
     try {
       const p = await preverKronos(velas);

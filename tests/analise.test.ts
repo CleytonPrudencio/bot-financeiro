@@ -103,3 +103,17 @@ describe('trava da análise na estratégia', () => {
     expect(conferirAnalise('comprar', { ...recente, terminada_em: new Date('2026-10-28T08:00:00Z') }, est, agora)).toMatchObject({ ok: false, motivo: expect.stringMatching(/28 h/) });
   });
 });
+
+describe('indicadores no tempo da estratégia', () => {
+  it('resumoCurto mede o IFR nas velas curtas (onde o piloto viu o repique)', async () => {
+    const { resumoCurto } = await import('../src/analise/indicadores.js');
+    const fech = Array.from({ length: 60 }, (_, i) => 100 - i * 0.2);
+    fech.push(fech[fech.length - 1]! + 0.5);
+    const velas = fech.map((f, i) => ({ t: Date.UTC(2026, 10, 4, 12) + i * 60_000, abre: i ? fech[i - 1]! : f, max: f + 0.1, min: f - 0.1, fecha: f, volume: 1 }));
+    const r = resumoCurto(velas, '1m');
+    expect(r.tempo_das_velas).toBe('1m');
+    expect(r.ifr_14_vela_anterior!).toBeLessThan(30);
+    expect(r.ifr_14!).toBeGreaterThan(r.ifr_14_vela_anterior!);
+    expect(r.ultimas_5_velas).toHaveLength(5);
+  });
+});
