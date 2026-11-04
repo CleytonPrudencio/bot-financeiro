@@ -2,14 +2,14 @@ import { config } from '../config.js';
 import { novoToken } from '../crypto.js';
 import { query, transacao, umOuNada } from '../db.js';
 import { logger } from '../logger.js';
-import { B3, cotacaoPublica, ehB3, MS_DA_VELA, paresDaMoeda, velas } from '../brokers/mercado.js';
+import { B3, cotacaoPublica, ehB3, MS_DA_VELA, MT5, paresDaMoeda, velas } from '../brokers/mercado.js';
 import { avisarStop, avisoEmAberto } from '../assistente/index.js';
 import type { Vela } from '../analise/indicadores.js';
 import { moedas } from '../brokers/tipos.js';
 import { corretoraReal, processarSinalDa, type Conta, type Estrategia, type Resultado } from '../motor.js';
 import { kronosLigado, preverKronos } from '../previsao/kronos.js';
 import { conferirSaida, deveAvisarStop, stopSugerido } from '../risco.js';
-import { avaliarEntrada, avaliarRepique, b3Aberta, cabeUmaAcao, DIA_MS, filtroDiario, KRONOS_MIN_ALTA, tendenciaQuebrou, velasFechadas } from './regras.js';
+import { avaliarEntrada, avaliarRepique, b3Aberta, cabeUmaAcao, valorParaComprar, DIA_MS, filtroDiario, KRONOS_MIN_ALTA, tendenciaQuebrou, velasFechadas } from './regras.js';
 
 // Piloto automático: o bot gera os próprios sinais das estratégias com "piloto ligado" e manda pelo
 // mesmo caminho do webhook (processarSinalDa). Então vale tudo: regras de risco, trava por
@@ -67,17 +67,18 @@ async function valorDaCompra(e: EstrategiaPiloto): Promise<number | null> {
   const real = operaReal(e);
   // assistente: o bot não vê o saldo da corretora; o aviso sugere o valor da estratégia
   if (real && e.exchange === B3) return e.valor_ordem;
-  let livre: number;
+  let livre: number | null;
   if (real) {
     const conta = (await umOuNada<Conta>('select * from contas where id = $1', [e.conta_id]))!;
     livre = (await corretoraReal(conta).saldos())[moeda] ?? 0;
+    // MetaTrader com saldo zerado: há plataformas (o SwingTrade da Genial) que não mostram o saldo e
+    // conferem na hora da ordem; o bot manda o valor da estratégia e a corretora recusa se faltar
+    if (conta.exchange === MT5 && livre <= 0) livre = null;
   } else {
     const [s] = await query<{ quantidade: number }>('select quantidade from saldos_simulados where conta_id = $1 and moeda = $2', [e.conta_id, moeda]);
     livre = s?.quantidade ?? 0;
   }
-  if (livre >= e.valor_ordem) return e.valor_ordem;
-  const valor = Math.floor(livre * 0.99 * 100) / 100;
-  return valor > 0 ? valor : null;
+  return valorParaComprar(livre, e.valor_ordem);
 }
 
 /** Já olhou este par nesta vela (o Kronos não roda duas vezes na mesma vela). Chave → expira em. */

@@ -55,7 +55,7 @@ function cartaoParada(r, recarregar) {
 // grupos que explicam a falta de compra (os outros são normais: desligada, com posição, comprou)
 const GRUPOS_ATENCAO = new Set(['sem_saldo', 'ia_vetou', 'limite_ia', 'risco_barrou', 'erro_ordem', 'erro_piloto', 'acao_cara', 'aviso']);
 const DICAS = {
-  sem_saldo: 'Confira o saldo na exchange ou na corretora (no MetaTrader, o "saldo livre" é o que conta).',
+  sem_saldo: 'Confira o saldo na exchange ou na corretora. No MetaTrader que mostra o saldo, o "saldo livre" é o que conta (o SwingTrade da Genial mostra 0,00 e o bot manda a ordem mesmo assim).',
   ia_vetou: 'O agente achou a entrada arriscada. Em Agente ou na estratégia dá para ajustar o rigor (ou deixar a IA consultiva).',
   limite_ia: 'Cada estratégia consulta a IA poucas vezes por dia para não gastar crédito; aumente em "consultas à IA por dia".',
   risco_barrou: 'Um limite da estratégia (intervalo, limite diário, posição) segurou a ordem.',
@@ -89,7 +89,7 @@ function cartaoDiagnostico(d) {
     h('div', { class: 'fichas diag-fichas' },
       h('span', { class: 'ficha' }, `Hoje: ${inteiro(sinais.executado ?? 0)} executados · ${inteiro(sinais.rejeitado ?? 0)} rejeitados · ${inteiro(sinais.ignorado ?? 0)} ignorados · ${inteiro(sinais.erro ?? 0)} com erro`),
       h('span', { class: `ficha ${d.real_no_servidor ? 'ficha-perigo' : ''}` }, d.real_no_servidor ? `${d.estrategias.em_real} estratégia(s) no real` : 'dinheiro real desligado no servidor'),
-      ...d.pontes_mt5.map((p) => h('span', { class: `ficha ${p.online ? '' : 'ficha-alerta'}` }, `${p.nome}: ponte ${p.online ? 'ligada' : 'parada'}${p.saldo_livre !== null ? ` · saldo livre ${fmt(p.saldo_livre)}` : ''}`))),
+      ...d.pontes_mt5.map((p) => h('span', { class: `ficha ${p.online ? '' : 'ficha-alerta'}` }, `${p.nome}: ponte ${p.online ? 'ligada' : 'parada'}${p.saldo_livre === null ? '' : Number(p.saldo_livre) > 0 ? ` · saldo livre ${fmt(p.saldo_livre)}` : ' · o MetaTrader não mostra o saldo: a corretora confere na ordem'}`))),
     d.motivos_hoje.length
       ? h('div', { class: 'diag-motivos' }, h('h3', {}, 'Motivos mais comuns hoje'),
           h('ol', {}, d.motivos_hoje.map((m) => h('li', {}, h('span', { class: 'mono' }, `${inteiro(m.n)}×`), ' ', selo(m.situacao, m.situacao === 'erro' ? 'perigo' : 'alerta'), ' ', m.motivo))))

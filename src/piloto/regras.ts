@@ -94,6 +94,17 @@ export function tendenciaQuebrou(fechadas: Vela[]): string | null {
 }
 
 /**
+ * Quanto comprar com `livre` de saldo: o valor da estratégia ou, se o saldo for menor, ele (menos 1%).
+ * `livre` null = a conta não informa o saldo (o MetaTrader SwingTrade da Genial mostra 0,00 de
+ * propósito: quem confere é a corretora, na hora da ordem); aí vale o valor da estratégia.
+ */
+export function valorParaComprar(livre: number | null, valorOrdem: number): number | null {
+  if (livre === null || livre >= valorOrdem) return valorOrdem;
+  const valor = Math.floor(livre * 0.99 * 100) / 100;
+  return valor > 0 ? valor : null;
+}
+
+/**
  * Ação da B3 só se compra inteira: com `valor` reais, cabe pelo menos 1 ação a `preco`? Null se cabe;
  * senão, o motivo. Sem preço conhecido, deixa passar (a ordem confere de novo).
  */

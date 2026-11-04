@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Vela } from '../src/analise/indicadores.js';
-import { avaliarEntrada, avaliarRepique, b3Aberta, cabeUmaAcao, DIA_MS, faltas, ler, tendenciaQuebrou, velasFechadas } from '../src/piloto/regras.js';
+import { avaliarEntrada, avaliarRepique, b3Aberta, cabeUmaAcao, valorParaComprar, DIA_MS, faltas, ler, tendenciaQuebrou, velasFechadas } from '../src/piloto/regras.js';
 
 const T0 = Date.UTC(2026, 0, 1);
 const velas = (fechamentos: number[]): Vela[] =>
@@ -118,5 +118,16 @@ describe('ação inteira na B3', () => {
     expect(cabeUmaAcao(50.74, 50)).toContain('mais que os R$ 50.00');
     expect(cabeUmaAcao(10, null)).toBe('sem saldo livre para comprar');
     expect(cabeUmaAcao(undefined, 90)).toBeNull();
+  });
+});
+
+describe('quanto comprar', () => {
+  it('o valor da estratégia, ou o saldo menor (menos 1%)', () => {
+    expect(valorParaComprar(500, 90)).toBe(90);
+    expect(valorParaComprar(50, 90)).toBe(49.5);
+    expect(valorParaComprar(0, 90)).toBeNull();
+  });
+  it('saldo não informado (MetaTrader SwingTrade da Genial): vai o valor da estratégia, a corretora confere', () => {
+    expect(valorParaComprar(null, 90)).toBe(90);
   });
 });
