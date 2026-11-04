@@ -72,7 +72,7 @@ function formEstrategia({ e = {}, contas, ias, aoSalvar }) {
         escolha('Velas que o piloto lê', 'auto_tempo', [['1m', '1 minuto'], ['5m', '5 minutos'], ['15m', '15 minutos'], ['1h', '1 hora'], ['4h', '4 horas'], ['1d', '1 dia']], e.auto_tempo ?? '1d', 'sempre a última vela fechada'),
         campo('Olhar o mercado a cada (min)', { name: 'auto_intervalo_min', type: 'number', min: '1', max: '1440', value: e.auto_intervalo_min ?? 2 }),
         campo('Volume mínimo do par em 24 h', { name: 'auto_volume_min', type: 'number', step: 'any', min: '0', value: e.auto_volume_min ?? 500000 }, 'na moeda de cotação; só vale na varredura'),
-        campo('Consultas à IA por dia (máximo)', { name: 'auto_max_ia_dia', type: 'number', min: '0', max: '100', value: e.auto_max_ia_dia ?? 6 }, 'cada compra proposta passa pelo agente e custa créditos'),
+        campo('Consultas à IA por dia (máximo)', { name: 'auto_max_ia_dia', type: 'number', min: '0', max: '100', value: e.auto_max_ia_dia ?? 10 }, 'cada compra proposta passa pelo agente e custa créditos'),
       ),
       h('div', { class: 'campos' },
         campo('Stop de perda (%)', { name: 'auto_stop_pct', type: 'number', step: '0.1', min: '0.1', max: '50', value: e.auto_stop_pct ?? 3 }, 'queda desde a compra que fecha a posição'),
@@ -232,7 +232,7 @@ function todasAsMoedas(contas, recarregar) {
       }
     },
   },
-  h('p', { class: 'suave' }, 'Cria uma estratégia de piloto para cada par da moeda com volume (ex.: tudo em BRL) ou, na conta MetaTrader 5, para cada ação que a ponte acompanha (as ~50 mais negociadas da B3). Cada uma tem posição própria: velas de 1 min e no máximo 2 consultas à IA por dia. Repique: alvo +1,5% e stop -1%; tendência: alvo +3% e stop -1,5%. Todas nascem em simulação; as que já existem ficam como estão.'),
+  h('p', { class: 'suave' }, 'Cria uma estratégia de piloto para cada par da moeda com volume (ex.: tudo em BRL) ou, na conta MetaTrader 5, para cada ação que a ponte acompanha (as ~50 mais negociadas da B3). Cada uma tem posição própria: velas de 1 min e no máximo 10 consultas à IA por dia. Repique: alvo +1,5% e stop -1%; tendência: alvo +3% e stop -1,5%. Todas nascem em simulação; as que já existem ficam como estão.'),
   h('div', { class: 'campos' },
     escolha('Conta', 'conta_id', contas.map((c) => [c.id, `${c.nome} (${c.exchange})`]), contas[0]?.id),
     campo('Moeda de cotação', { name: 'moeda', value: 'BRL', required: true }),

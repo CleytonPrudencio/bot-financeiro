@@ -547,7 +547,7 @@ const esquemaEstrategia = z
     auto_tempo: z.enum(['1m', '5m', '15m', '1h', '4h', '1d']).default('1d'),
     auto_intervalo_min: z.number().int().min(1).max(1440).default(2),
     auto_volume_min: z.number().min(0).default(500_000),
-    auto_max_ia_dia: z.number().int().min(0).max(100).default(6),
+    auto_max_ia_dia: z.number().int().min(0).max(100).default(10),
     auto_exigir_virada: z.boolean().default(true),
     auto_estilo: z.enum(['tendencia', 'repique']).default('tendencia'),
     // stop pela volatilidade (ATR x multiplicador) em vez do stop fixo
