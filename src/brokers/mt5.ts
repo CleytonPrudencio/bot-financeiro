@@ -14,6 +14,8 @@ export const MT5 = 'mt5';
 const COTACAO_VALIDA_MS = 3 * 60_000;
 /** Tempo para a ponte pegar a ordem; depois disso ela expira e não é mais executada. */
 export const ORDEM_EXPIRA_S = 30;
+/** Início do erro de ordem sem resposta: a rota da ponte o procura para conciliar uma resposta atrasada. */
+export const SEM_RESPOSTA = 'a ponte MT5 pegou a ordem e não respondeu em 60 s';
 /** Tempo para a ponte responder uma ordem que ela já pegou. */
 const RESPOSTA_MS = 60_000;
 
@@ -143,7 +145,12 @@ export class CorretoraMt5 implements Corretora {
       }
       if (c.situacao === 'enviado' && c.enviado_em && Date.now() - new Date(c.enviado_em).getTime() > RESPOSTA_MS) {
         logger.error({ comando: id, ...dados }, 'ponte MT5 pegou a ordem e não respondeu');
-        throw new Error('a ponte MT5 pegou a ordem e não respondeu em 60 s: confira no MetaTrader se ela foi executada');
+        // marca para conciliar: se a resposta chegar depois, a rota da ponte grava a ordem e a posição
+        await query(
+          `update mt5_comandos set situacao = 'erro', resultado = $2, terminado_em = now() where id = $1 and situacao = 'enviado'`,
+          [id, JSON.stringify({ ok: false, sem_resposta: true, erro: 'a ponte não respondeu a tempo' })],
+        );
+        throw new Error(`${SEM_RESPOSTA}: confira no MetaTrader se ela foi executada`);
       }
     }
   }

@@ -37,6 +37,15 @@ class TestePonte(unittest.TestCase):
         self.assertEqual(ponte.planejar_fechamento([(11, "PETR4", 100)], 57), [])
         self.assertEqual(ponte.planejar_fechamento([], 10), [])
 
+    def test_escolher_velas(self):
+        simbolos = ["PETR4", "VALE3", "ITUB4"]
+        # nunca mandou: as mais antigas primeiro, até o limite
+        self.assertEqual(ponte.escolher_velas(simbolos, {}, 1000, por_vez=2), {"PETR4", "VALE3"})
+        # mandou há pouco: espera; a que está vencida há mais tempo vai antes
+        envio = {"PETR4": 990, "VALE3": 900, "ITUB4": 800}
+        self.assertEqual(ponte.escolher_velas(simbolos, envio, 1000, por_vez=1, a_cada=60), {"ITUB4"})
+        self.assertEqual(ponte.escolher_velas(simbolos, envio, 1000, por_vez=5, a_cada=60), {"VALE3", "ITUB4"})
+
     def test_conferir_ordem(self):
         ok = {"lado": "compra", "quantidade": 1, "preco_ref": 38.0, "idade_s": 1.2}
         self.assertIsNone(ponte.conferir_ordem(ok, 200))
@@ -61,6 +70,7 @@ class TestePonte(unittest.TestCase):
 
     def test_vela_e_env(self):
         v = {"time": 1700000000, "open": 1, "high": 2, "low": 0.5, "close": 1.5, "real_volume": 0, "tick_volume": 7}
+        self.assertEqual(ponte.vela_para_lista({**v, "close": 16.479999542236328})[4], 16.48)
         self.assertEqual(ponte.vela_para_lista(v), [1700000000000, 1.0, 2.0, 0.5, 1.5, 7.0])
         with tempfile.TemporaryDirectory() as d:
             arq = pathlib.Path(d) / "ponte.env"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { operacoesFechadas, porDia, resumoDoResultado, type OrdemExecutada } from '../src/resultado.js';
+import { operacoesFechadas, porDia, resumoDoResultado, saldoDaConta, type OrdemExecutada } from '../src/resultado.js';
 
 const o = (lado: 'compra' | 'venda', quantidade: number, custo: number, taxa: number, criada_em: string, mudar: Partial<OrdemExecutada> = {}): OrdemExecutada => ({
   estrategia_id: 1, estrategia: 'Piloto PEPE', simbolo: 'PEPE/BRL', lado, modo: 'real', quantidade, custo, taxa, criada_em, ...mudar,
@@ -36,5 +36,18 @@ describe('ganho e perda das operações', () => {
     expect(dias.map((d) => [d.dia, d.resultado, d.acumulado])).toEqual([['2026-11-03', 3, 3], ['2026-11-04', -1, 2], ['2026-11-05', 0, 2]]);
     const r = resumoDoResultado(ops, new Date('2026-11-05T02:00:00Z'), 'America/Sao_Paulo');
     expect(r).toMatchObject({ total: 2, hoje: -1, operacoes: 2, ganhas: 1, perdidas: 1, acerto_pct: 50, maior_ganho: 3, maior_perda: -1 });
+  });
+});
+
+describe('saldo a partir do que o dono colocou', () => {
+  it('tinha 50: perdeu 0,63 na PEPE e tem uma posição aberta valendo 0,20 a mais', () => {
+    const ops = operacoesFechadas([o('compra', 100, 50, 0, '2026-11-04T16:30:00Z'), o('venda', 100, 49.42, 0.05, '2026-11-04T16:32:00Z')]);
+    const s = saldoDaConta(50, ops, 0.2, new Date('2026-11-04T20:00:00Z'), 'America/Sao_Paulo', 3);
+    expect(s.realizado).toBeCloseTo(-0.63, 6);
+    expect(s.saldo).toBeCloseTo(49.57, 6);
+    expect(s.variacao_pct).toBeCloseTo(-0.86, 2);
+    expect(s.serie.map((x) => x.dia)).toEqual(['2026-11-02', '2026-11-03', '2026-11-04']);
+    expect(s.serie[0]!.saldo).toBe(50);
+    expect(s.serie[2]!.saldo).toBeCloseTo(49.57, 6); // o último ponto já soma o aberto
   });
 });

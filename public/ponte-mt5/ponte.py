@@ -23,13 +23,16 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-VERSAO = "1.1"
+VERSAO = "1.2"
 MAGIC = 50501  # marca as ordens do bot no MetaTrader
 LOTE_PADRAO = 100  # na B3, lote padrão de ações; abaixo disso, mercado fracionário (código + "F")
 IDADE_MAX_S = 20
 INTERVALO_S = 1.0
 VELAS_A_CADA_S = 60
-QTD_VELAS = {"1m": 300, "5m": 300, "15m": 300, "1h": 300, "4h": 300, "1d": 130}
+# Com ~50 ações, mandar as velas de todas de uma vez passava do limite do bot (413) e a ponte ficava
+# presa reenviando, sem conseguir devolver o resultado das ordens. Agora vão poucas por vez, em rodízio.
+VELAS_POR_VEZ = 8
+QTD_VELAS = {"1m": 150, "5m": 200, "15m": 260, "1h": 260, "4h": 200, "1d": 130}
 
 log = logging.getLogger("ponte")
 
@@ -92,8 +95,18 @@ def conferir_ordem(cmd, valor_max):
 
 
 def vela_para_lista(v):
-    """Uma vela do MT5 (time em segundos) no formato do bot: [t_ms, abre, max, min, fecha, volume]."""
-    return [int(v["time"]) * 1000, float(v["open"]), float(v["high"]), float(v["low"]), float(v["close"]), float(v["real_volume"] or v["tick_volume"])]
+    """Uma vela do MT5 (time em segundos) no formato do bot: [t_ms, abre, max, min, fecha, volume].
+    Preços com 4 casas (16.479999542236328 vira 16.48): o corpo fica bem menor."""
+    return [int(v["time"]) * 1000, round(float(v["open"]), 4), round(float(v["high"]), 4), round(float(v["low"]), 4),
+            round(float(v["close"]), 4), int(v["real_volume"] or v["tick_volume"])]
+
+
+def escolher_velas(simbolos, ultimo_envio, agora, por_vez=VELAS_POR_VEZ, a_cada=VELAS_A_CADA_S):
+    """Quais ações levam velas nesta sincronização: as que estão há mais tempo sem mandar (até
+    `por_vez`), e só se já passou `a_cada` segundos desde o último envio de cada uma."""
+    vencidas = [s for s in simbolos if agora - ultimo_envio.get(s, 0) >= a_cada]
+    vencidas.sort(key=lambda s: ultimo_envio.get(s, 0))
+    return set(vencidas[:por_vez])
 
 
 def arquivo_env(pasta):
@@ -153,6 +166,7 @@ class MetaTrader:
         }
 
     def mercado(self, simbolos, tempos, com_velas):
+        """Cotação de todas as ações de `simbolos`; velas só das que estão em `com_velas` (um conjunto)."""
         saida = []
         for s in simbolos:
             if not self.mt5.symbol_select(s, True):
@@ -164,7 +178,7 @@ class MetaTrader:
                 "cotacao": float(tick.last or tick.bid) if tick and (tick.last or tick.bid) else None,
                 "volume_financeiro": float(getattr(info, "session_turnover", 0) or 0) if info else None,
             }
-            if com_velas:
+            if s in com_velas:
                 item["velas"] = {}
                 for t in tempos:
                     barras = self.mt5.copy_rates_from_pos(s, self.tempos[t], 0, QTD_VELAS[t])
@@ -260,16 +274,21 @@ def principal():
     valor_max = float(env.get("PONTE_VALOR_MAX", "200"))
     mt = MetaTrader()
     observar, tempos = [], ["15m", "1d"]
-    resultados, ultimas_velas = [], 0.0
+    resultados, ultimo_envio = [], {}
     log.info("ponte ligada ao bot em %s (teto por ordem: R$ %.2f)", url, valor_max)
     while True:
         try:
-            com_velas = time.time() - ultimas_velas > VELAS_A_CADA_S
-            corpo = {"versao": VERSAO, "conta": mt.conta(), "mercado": mt.mercado(observar, tempos, com_velas), "resultados": resultados}
+            # com resultado de ordem para devolver, vai sem velas: o resultado tem pressa
+            com_velas = set() if resultados else escolher_velas(observar, ultimo_envio, time.time())
+            enviando = list(resultados)
+            corpo = {"versao": VERSAO, "conta": mt.conta(), "mercado": mt.mercado(observar, tempos, com_velas), "resultados": enviando}
             resposta = sincronizar(url, token, corpo)
-            resultados = []
-            if com_velas and observar:
-                ultimas_velas = time.time()
+            # só tira da fila o que o bot recebeu
+            del resultados[: len(enviando)]
+            for s in com_velas:
+                ultimo_envio[s] = time.time()
+            if enviando:
+                log.info("resultado de %d ordem(ns) entregue ao bot", len(enviando))
             observar, tempos = resposta.get("observar", []), resposta.get("tempos", tempos)
             for cmd in resposta.get("comandos", []):
                 motivo = conferir_ordem(cmd, valor_max)
@@ -288,7 +307,8 @@ def principal():
                 continue  # devolve o resultado na hora
         except urllib.error.HTTPError as e:
             log.error("o bot respondeu %s: %s", e.code, e.read()[:200])
-            if e.code == 401:
+            if e.code == 413:
+                log.error("corpo grande demais: a ponte manda menos velas por vez na próxima")
                 raise SystemExit("token da ponte inválido: gere outro no painel (Contas)")
             time.sleep(10)
         except Exception as e:  # noqa: BLE001 - sem internet, bot fora do ar: tenta de novo

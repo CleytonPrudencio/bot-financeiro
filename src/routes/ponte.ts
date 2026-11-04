@@ -4,7 +4,8 @@ import { z } from 'zod';
 import { hashToken } from '../crypto.js';
 import { query, transacao, umOuNada } from '../db.js';
 import { logger } from '../logger.js';
-import { observarMt5, ORDEM_EXPIRA_S, paraBot, paraMt5, MT5 } from '../brokers/mt5.js';
+import { observarMt5, ORDEM_EXPIRA_S, paraBot, paraMt5, MT5, SEM_RESPOSTA } from '../brokers/mt5.js';
+import { atualizarPosicao } from '../motor.js';
 import { QUOTEX, sincronizarPonte } from '../binarias/index.js';
 
 // POST /ponte/sincronizar: a ponte MetaTrader 5 (no Windows do dono) liga para cá a cada 1 a 2 s.
@@ -57,10 +58,60 @@ const esquema = z.object({
     .optional(),
 });
 
+/**
+ * A resposta de uma ordem chegou depois que o bot desistiu de esperar (ele gravou a ordem como erro
+ * "pegou e não respondeu"). Se a corretora executou, a ordem e a posição passam a valer agora: senão a
+ * ação ficava comprada no MetaTrader sem o bot saber (sem stop, sem alvo). Devolve true se tratou.
+ */
+async function conciliarAtrasada(contaId: number, r: { id: number; ok: boolean; preco?: number | undefined; quantidade?: number | undefined; id_exchange?: string | null | undefined; erro?: string | undefined }): Promise<boolean> {
+  const [cmd] = await query<{ dados: { lado: 'compra' | 'venda'; simbolo: string; preco_ref: number }; criado_em: Date }>(
+    `select dados, criado_em from mt5_comandos where id = $1 and conta_id = $2 and situacao = 'erro' and (resultado->>'sem_resposta')::boolean`,
+    [r.id, contaId],
+  );
+  if (!cmd) return false;
+  await query(`update mt5_comandos set situacao = $3, resultado = $4, terminado_em = now() where id = $1 and conta_id = $2`, [
+    r.id, contaId, r.ok ? 'feito' : 'erro', JSON.stringify({ ...r, chegou_atrasada: true }),
+  ]);
+  if (!r.ok || !(Number(r.quantidade) > 0)) {
+    logger.warn({ comando: r.id, conta: contaId, erro: r.erro }, 'ponte MT5: a ordem sem resposta não foi executada (resposta atrasada)');
+    return true;
+  }
+  const quantidade = Number(r.quantidade);
+  const preco = Number(r.preco ?? cmd.dados.preco_ref);
+  // a corretora executou: o log é a prova, antes de qualquer gravação
+  logger.info({ comando: r.id, conta: contaId, ...cmd.dados, quantidade, preco, id_exchange: r.id_exchange ?? null }, 'ordem executada (resposta atrasada da ponte MT5)');
+  const [ordem] = await query<{ id: number; estrategia_id: number; sinal_id: number | null }>(
+    `select id, estrategia_id, sinal_id from ordens
+      where conta_id = $1 and simbolo = $2 and lado = $3 and situacao = 'erro' and erro like $4
+        and criada_em between $5 and $5::timestamptz + interval '5 minutes'
+      order by criada_em limit 1`,
+    [contaId, cmd.dados.simbolo, cmd.dados.lado, `${SEM_RESPOSTA}%`, cmd.criado_em],
+  );
+  if (!ordem) {
+    logger.error({ comando: r.id, conta: contaId, ...cmd.dados }, 'ponte MT5: ordem executada sem a ordem do bot para conciliar; confira no MetaTrader');
+    return true;
+  }
+  await transacao(async (c) => {
+    await c.query('select pg_advisory_xact_lock(1, $1::int)', [ordem.estrategia_id]);
+    const pos = (await c.query<{ quantidade: number; custo_total: number }>('select quantidade, custo_total from posicoes where estrategia_id = $1', [ordem.estrategia_id])).rows[0];
+    const exec = { quantidade, precoMedio: preco, custo: quantidade * preco, taxa: 0, idExchange: r.id_exchange ?? null };
+    await c.query(
+      `update ordens set situacao = 'executada', quantidade = $2, preco_medio = $3, custo = $4, id_exchange = $5,
+              erro = 'executada depois: a ponte respondeu atrasada' where id = $1`,
+      [ordem.id, quantidade, preco, exec.custo, exec.idExchange],
+    );
+    await atualizarPosicao(c, ordem.estrategia_id, cmd.dados.lado, exec, { quantidade: Number(pos?.quantidade ?? 0), custo_total: Number(pos?.custo_total ?? 0) });
+    if (ordem.sinal_id) {
+      await c.query(`update sinais set situacao = 'executado', motivo = 'executada depois: a ponte respondeu atrasada' where id = $1`, [ordem.sinal_id]);
+    }
+  });
+  return true;
+}
+
 ponte.post(
   '/sincronizar',
   rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false }),
-  express.json({ limit: '4mb' }),
+  express.json({ limit: '8mb' }),
   async (req, res) => {
     const token = String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
     if (token.length < 20 || token.length > 100) return void res.status(401).json({ erro: 'token da ponte ausente' });
@@ -89,7 +140,9 @@ ponte.post(
           where id = $1 and conta_id = $2 and situacao = 'enviado' returning id`,
         [r.id, conta.id, r.ok ? 'feito' : 'erro', JSON.stringify(r)],
       );
-      if (!feito.length) logger.warn({ comando: r.id, conta: conta.id }, 'ponte MT5 respondeu uma ordem que não estava esperando resposta');
+      if (!feito.length && !(await conciliarAtrasada(conta.id, r))) {
+        logger.warn({ comando: r.id, conta: conta.id }, 'ponte MT5 respondeu uma ordem que não estava esperando resposta');
+      }
     }
 
     // ordens pendentes desta conta: as que esperaram demais expiram; as outras vão para a ponte

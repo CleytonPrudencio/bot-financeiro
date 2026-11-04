@@ -978,3 +978,15 @@ body.na-entrada { overflow: hidden; }
 .kpi-valor.kpi-mudou { animation: kpi-pisca 1.2s ease-out; }
 @keyframes kpi-pisca { 0% { color: var(--primaria-2); } 100% { color: inherit; } }
 @media (prefers-reduced-motion: reduce) { .feed-item.entrando, .kpi-valor.kpi-mudou, .barra-resultado, .resultado-corpo { animation: none; } }
+
+.diag-divergencia { margin-top: 10px; }
+.diag-divergencia ul { margin: 4px 0; padding-left: 18px; }
+
+/* painel: seu saldo */
+.saldo-contas { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+.saldo-conta { display: grid; gap: 6px; padding: 12px 14px; border-radius: 14px; background: var(--painel-2); border: 1px solid var(--borda); animation: subir 0.35s var(--mola); }
+.saldo-topo { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.saldo-valor { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
+.saldo-valor strong { font-size: 26px; letter-spacing: -0.02em; }
+.saldo-variacao { font-weight: 650; font-variant-numeric: tabular-nums; }
+.grafico-saldo { margin-top: 4px; }

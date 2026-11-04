@@ -256,3 +256,40 @@ export function graficoResultado(dias, moeda = '') {
   });
   return caixa;
 }
+
+/**
+ * O saldo dia a dia contra o que foi colocado (linha tracejada): área verde acima, vermelha abaixo.
+ * `serie` = [{dia, saldo}], `capital` = o valor colocado.
+ */
+export function graficoSaldo(serie, capital) {
+  const w = 640;
+  const hh = 150;
+  const m = { e: 52, d: 12, t: 10, b: 22 };
+  const valores = [...serie.map((p) => p.saldo), capital];
+  let min = Math.min(...valores);
+  let max = Math.max(...valores);
+  if (max - min < 1e-9) {
+    max += Math.max(1, capital * 0.02);
+    min -= Math.max(1, capital * 0.02);
+  }
+  const folga = (max - min) * 0.15;
+  const y = escala(min - folga, max + folga, hh - m.b, m.t);
+  const x = escala(0, Math.max(serie.length - 1, 1), m.e, w - m.d);
+  const pts = serie.map((p, i) => [x(i), y(p.saldo)]);
+  // linha reta entre os dias: a curva suave inventava picos que o saldo não teve
+  const linha = pts.map(([px, py], i) => `${i ? 'L' : 'M'}${px},${py}`).join(' ');
+  const ultimo = serie[serie.length - 1]?.saldo ?? capital;
+  const cor = ultimo >= capital ? 'var(--ok)' : 'var(--perigo)';
+  const id = `gs${Math.random().toString(36).slice(2, 8)}`;
+  const base = y(capital);
+  const grade = [min - folga, capital, max + folga].map((v) => s('text', { x: m.e - 8, y: y(v) + 4, class: 'grade-texto', 'text-anchor': 'end' }, fmt(v)));
+  const rotulos = serie.map((p, i) => (i % 7 === (serie.length - 1) % 7 ? s('text', { x: x(i), y: hh - 5, class: 'grade-texto', 'text-anchor': 'middle' }, `${p.dia.slice(8, 10)}/${p.dia.slice(5, 7)}`) : null));
+  return s('svg', { class: 'grafico-area grafico-saldo', viewBox: `0 0 ${w} ${hh}`, role: 'img', 'aria-label': `Saldo nos últimos ${serie.length} dias, contra o valor colocado de ${fmt(capital)}` },
+    s('defs', {}, s('linearGradient', { id, x1: 0, y1: 0, x2: 0, y2: 1 }, s('stop', { offset: '0', 'stop-color': cor, 'stop-opacity': 0.35 }), s('stop', { offset: '1', 'stop-color': cor, 'stop-opacity': 0 }))),
+    grade,
+    rotulos,
+    s('line', { x1: m.e, x2: w - m.d, y1: base, y2: base, class: 'linha-zero' }),
+    pts.length > 1 ? s('path', { class: 'area-anima', d: `${linha} L${x(serie.length - 1)},${base} L${m.e},${base} Z`, fill: `url(#${id})` }) : null,
+    pts.length > 1 ? s('path', { class: 'traco-anima', d: linha, fill: 'none', stroke: cor, 'stroke-width': 2.4, pathLength: 1 }) : null,
+    pts.length ? s('circle', { cx: pts[pts.length - 1][0], cy: pts[pts.length - 1][1], r: 4.5, fill: cor, class: 'ponto-saldo' }) : null);
+}

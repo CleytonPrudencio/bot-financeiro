@@ -4,6 +4,7 @@
 
 export interface OrdemExecutada {
   estrategia_id: number;
+  conta_id?: number;
   estrategia: string;
   simbolo: string;
   lado: 'compra' | 'venda';
@@ -15,6 +16,7 @@ export interface OrdemExecutada {
 }
 
 export interface Operacao {
+  conta_id: number | null;
   estrategia: string;
   simbolo: string;
   moeda: string;
@@ -46,6 +48,7 @@ export function operacoesFechadas(ordens: OrdemExecutada[]): Operacao[] {
       const base = p.custo * (vendida / p.quantidade);
       const resultado = custo - Number(o.taxa) - base;
       ops.push({
+        conta_id: o.conta_id ?? null,
         estrategia: o.estrategia,
         simbolo: o.simbolo,
         moeda: moedaDe(o.simbolo),
@@ -113,4 +116,17 @@ export function resumoDoResultado(ops: Operacao[], agora: Date, fuso: string) {
     maior_ganho: ganhas.length ? Math.max(...ganhas.map((o) => o.resultado)) : 0,
     maior_perda: perdidas.length ? Math.min(...perdidas.map((o) => o.resultado)) : 0,
   };
+}
+
+/**
+ * O saldo de uma conta a partir do que o dono colocou: capital + resultado das operações fechadas +
+ * o que está em aberto agora (valor de mercado das posições menos o custo). Por dia, o saldo do fim
+ * do dia pelas operações fechadas; o último ponto soma o aberto.
+ */
+export function saldoDaConta(capital: number, ops: Operacao[], emAberto: number, agora: Date, fuso: string, dias = 30) {
+  const serie = porDia(ops, agora, fuso, dias).map((d) => ({ dia: d.dia, saldo: capital + d.acumulado }));
+  const realizado = ops.reduce((t, o) => t + o.resultado, 0);
+  const saldo = capital + realizado + emAberto;
+  if (serie.length) serie[serie.length - 1]!.saldo = saldo;
+  return { capital, realizado, em_aberto: emAberto, saldo, variacao: saldo - capital, variacao_pct: capital > 0 ? ((saldo - capital) / capital) * 100 : null, serie };
 }

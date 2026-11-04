@@ -1,8 +1,8 @@
 import {
-  agora, api, botaoSegurar, cabecalho, confirmar, contar, data, escalonar, fmt, h, icone, inteiro, precoCompacto,
+  agora, api, botao, botaoSegurar, cabecalho, campo, confirmar, contar, data, escalonar, fmt, h, icone, inteiro, janela, lerForm, precoCompacto,
   FUSO, qtd, relativo, selo, seloLado, seloModo, tentar, vazio,
 } from '../base.js';
-import { graficoArea, graficoResultado, linhaPequena, rosca } from '../graficos.js';
+import { graficoArea, graficoResultado, graficoSaldo, linhaPequena, rosca } from '../graficos.js';
 
 function saudacao() {
   const hora = Number(new Date(agora()).toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: FUSO }));
@@ -107,6 +107,10 @@ function cartaoDiagnostico(d) {
       h('span', { class: 'ficha' }, `Hoje: ${inteiro(sinais.executado ?? 0)} executados · ${inteiro(sinais.rejeitado ?? 0)} rejeitados · ${inteiro(sinais.ignorado ?? 0)} ignorados · ${inteiro(sinais.erro ?? 0)} com erro`),
       h('span', { class: `ficha ${d.real_no_servidor ? 'ficha-perigo' : ''}` }, d.real_no_servidor ? `${d.estrategias.em_real} estratégia(s) no real` : 'dinheiro real desligado no servidor'),
       ...d.pontes_mt5.map((p) => h('span', { class: `ficha ${p.online ? '' : 'ficha-alerta'}` }, `${p.nome}: ponte ${p.online ? 'ligada' : 'parada'}${p.saldo_livre === null ? '' : Number(p.saldo_livre) > 0 ? ` · saldo livre ${fmt(p.saldo_livre)}` : ' · o MetaTrader não mostra o saldo: a corretora confere na ordem'}`))),
+    ...d.pontes_mt5.filter((p) => p.divergencias?.length).map((p) => h('div', { class: 'destaque destaque-alerta diag-divergencia' }, icone('alerta'), h('div', {},
+      h('strong', {}, `${p.nome}: o MetaTrader e o bot não batem`),
+      h('ul', {}, p.divergencias.map((x) => h('li', {}, `${x.codigo}: ${x.no_mt5} ação(ões) no MetaTrader, ${x.no_bot} no bot`))),
+      h('p', { class: 'suave' }, 'Uma ordem pode ter saído sem o bot saber (ou o contrário). Confira na aba Negociação do MetaTrader: se a ação está lá e o bot não sabe, ela fica sem stop; venda pelo MetaTrader ou me avise para conciliar.')))),
     d.motivos_hoje.length
       ? h('div', { class: 'diag-motivos' }, h('h3', {}, 'Motivos mais comuns hoje'),
           h('ol', {}, d.motivos_hoje.map((m) => h('li', {}, h('span', { class: 'mono' }, `${inteiro(m.n)}×`), ' ', selo(m.situacao, m.situacao === 'erro' ? 'perigo' : 'alerta'), ' ', m.motivo))))
@@ -117,8 +121,62 @@ const sinalDe = (v) => `${v > 0 ? '+' : ''}${fmt(v)}`;
 const classeDe = (v) => (v > 0 ? 'positivo' : v < 0 ? 'negativo' : '');
 const CHAVE_MODO_RESULTADO = 'painel:resultado-modo';
 
+/** Pergunta (ou muda) quanto o dono colocou na conta. */
+function pedirCapital(s, aoSalvar) {
+  const form = h('form', {
+    class: 'form',
+    onsubmit: async (ev) => {
+      ev.preventDefault();
+      const { capital } = lerForm(form);
+      if (await tentar(() => api('PUT', `/contas/${s.conta_id}/capital`, { capital_inicial: capital }), 'Valor salvo')) {
+        dlg.fechar();
+        aoSalvar();
+      }
+    },
+  },
+  h('p', { class: 'suave' }, `Quanto você colocou na ${s.nome} para o robô operar? O painel mostra o saldo subindo e descendo a partir desse valor.`),
+  h('div', { class: 'campos' }, campo(`Valor colocado (${s.moeda})`, { name: 'capital', type: 'number', step: '0.01', min: '0', required: true, value: s.capital ?? '' })),
+  h('div', { class: 'acoes acoes-fim' }, botao('Salvar', { nomeIcone: 'ok', type: 'submit' })));
+  const dlg = janela(`Valor colocado · ${s.nome}`, { icone: 'contas' }, form);
+}
+
+/** "Tinha 50, agora 48, agora 52": o saldo de cada conta real contra o que o dono colocou. */
+function cartaoSaldo(recarregarResultado) {
+  const corpo = h('div', { class: 'saldo-contas' });
+  const el = h('div', { class: 'cartao saldo' },
+    h('div', { class: 'cartao-topo' }, h('div', {}, h('h2', {}, 'Seu saldo'), h('p', { class: 'suave' }, 'O que você colocou em cada conta, mais os ganhos e as perdas do robô (fechados e em aberto)'))),
+    corpo);
+  let assinatura = '';
+  function atualizar(saldos) {
+    const nova = JSON.stringify(saldos);
+    if (nova === assinatura) return;
+    assinatura = nova;
+    if (!saldos?.length) {
+      corpo.replaceChildren(h('p', { class: 'suave' }, 'Nenhuma conta real ainda.'));
+      return;
+    }
+    corpo.replaceChildren(...saldos.map((s) => {
+      if (s.capital === null) {
+        return h('div', { class: 'saldo-conta' },
+          h('strong', {}, s.nome), h('p', { class: 'suave' }, 'Diga quanto você colocou nesta conta para ver o saldo subindo e descendo.'),
+          botao('Informar o valor colocado', { classe: 'pequeno', nomeIcone: 'editar', onclick: () => pedirCapital(s, recarregarResultado) }));
+      }
+      const classe = classeDe(s.variacao);
+      return h('div', { class: 'saldo-conta' },
+        h('div', { class: 'saldo-topo' },
+          h('div', {}, h('span', { class: 'suave' }, `${s.nome} · ${s.exchange}`),
+            h('div', { class: 'saldo-valor' }, h('strong', { class: 'mono' }, `${s.moeda} ${fmt(s.saldo)}`),
+              h('span', { class: `saldo-variacao ${classe}` }, `${sinalDe(s.variacao)} (${s.variacao_pct === null ? '—' : `${s.variacao_pct > 0 ? '+' : ''}${fmt(s.variacao_pct)}%`})`))),
+          botao('Mudar valor colocado', { classe: 'pequeno secundario', nomeIcone: 'editar', onclick: () => pedirCapital(s, recarregarResultado) })),
+        h('p', { class: 'suave pequeno-texto' }, `Você colocou ${fmt(s.capital)} · operações fechadas ${sinalDe(s.realizado)} · em aberto ${sinalDe(s.em_aberto)}`),
+        graficoSaldo(s.serie, s.capital));
+    }));
+  }
+  return { el, atualizar };
+}
+
 /** Ganhos e perdas das operações fechadas, com o gráfico por dia; recarrega sozinho sem piscar. */
-function cartaoResultado() {
+function cartaoResultado(aoReceberSaldos = () => {}) {
   let modo = 'real';
   try {
     modo = localStorage.getItem(CHAVE_MODO_RESULTADO) || 'real';
@@ -158,7 +216,7 @@ function cartaoResultado() {
     const m = d.moedas.find((x) => x.moeda === moedaEscolhida) ?? d.moedas[0];
     moedaEscolhida = m.moeda;
     const numero = (rotulo, valor, classe = '', extra = '') => h('div', { class: 'resultado-numero' }, h('span', { class: 'suave' }, rotulo), h('strong', { class: `mono ${classe}` }, valor), extra ? h('small', { class: 'suave' }, extra) : null);
-    corpo.replaceChildren(
+    corpo.replaceChildren(...[
       d.moedas.length > 1
         ? h('div', { class: 'fichas' }, d.moedas.map((x) => h('button', {
             type: 'button', class: `ficha ${x.moeda === m.moeda ? 'ficha-escolhida' : ''}`,
@@ -186,12 +244,13 @@ function cartaoResultado() {
               h('div', { class: 'feed-texto' }, h('strong', {}, o.simbolo), h('span', { class: 'suave' }, `${o.estrategia} · ${relativo(o.fechada_em)}`)),
               h('span', { class: `mono ${classeDe(o.resultado)}` }, sinalDe(o.resultado)))))
         : null,
-    );
+    ].filter(Boolean));
   }
 
   async function carregar() {
     const d = await api('GET', `/resultado?modo=${modo}`).catch(() => null);
     if (!d) return;
+    aoReceberSaldos(d.saldos ?? []);
     const nova = JSON.stringify(d);
     if (nova === assinatura) return; // nada mudou: não refaz (sem piscar)
     assinatura = nova;
@@ -261,7 +320,9 @@ export async function paginaPainel({ recarregar, agendar }) {
 
   // ao vivo: os números e o feed a cada 5 s, o resultado e o diagnóstico a cada 30 s, sem recarregar
   const vivos = new Map();
-  const resultado = cartaoResultado();
+  let resultado = null;
+  const saldo = cartaoSaldo(() => resultado?.carregar());
+  resultado = cartaoResultado((s) => saldo.atualizar(s));
   const aoVivo = cartaoAoVivo();
   const caixaDiag = h('div', {}, diag && diag.grupos.length ? cartaoDiagnostico(diag) : null);
   let assinaturaDiag = JSON.stringify(diag);
@@ -305,6 +366,7 @@ export async function paginaPainel({ recarregar, agendar }) {
       kpi('Exposição aberta', exposicao, { nomeIcone: 'contas', nota: 'custo das posições', vivos, chave: 'exposicao' }),
       kpi('Erros hoje', r.hoje.erros, { nomeIcone: 'alerta', formato: inteiro, classe: Number(r.hoje.erros) ? 'kpi-perigo' : '', nota: Number(r.hoje.erros) ? 'veja em Ordens' : 'nenhum', vivos, chave: 'erros' }),
     ])),
+    saldo.el,
     cartaoParada(r, recarregar),
     h('div', { class: 'grade-2-1' }, resultado.el, aoVivo.el),
     caixaDiag,

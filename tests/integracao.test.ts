@@ -550,6 +550,26 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     expect((await sincronizar({})).corpo.comandos).toEqual([]);
     const [velha] = await db.query<{ situacao: string }>('select situacao from mt5_comandos order by id desc limit 1');
     expect(velha!.situacao).toBe('expirado');
+
+    // a ponte pegou a ordem, o bot cansou de esperar (erro "não respondeu") e a resposta chegou depois:
+    // a ordem e a posição passam a valer, para a ação não ficar comprada no MetaTrader sem o bot saber
+    const { SEM_RESPOSTA } = await import('../src/brokers/mt5.js');
+    const estId = Number(c.corpo.estrategia_criada);
+    const [atrasado] = await db.query<{ id: number }>(
+      `insert into mt5_comandos (conta_id, dados, situacao, resultado, criado_em, enviado_em)
+       values ($1, '{"lado":"compra","simbolo":"LREN3/BRL","quantidade":5,"preco_ref":16}', 'erro', '{"ok":false,"sem_resposta":true}', now() - interval '2 minutes', now() - interval '2 minutes')
+       returning id`, [c.corpo.id]);
+    const [ordemErro] = await db.query<{ id: number }>(
+      `insert into ordens (estrategia_id, conta_id, modo, simbolo, lado, quantidade, preco_medio, custo, situacao, erro, criada_em)
+       values ($1, $2, 'real', 'LREN3/BRL', 'compra', 0, 0, 0, 'erro', $3, now() - interval '1 minute') returning id`,
+      [estId, c.corpo.id, `${SEM_RESPOSTA}: confira no MetaTrader se ela foi executada`]);
+    await db.query('delete from posicoes where estrategia_id = $1', [estId]);
+    expect((await sincronizar({ resultados: [{ id: atrasado!.id, ok: true, preco: 16.1, quantidade: 5, id_exchange: '777' }] })).status).toBe(200);
+    const [conciliada] = await db.query<{ situacao: string; quantidade: number; preco_medio: number }>('select situacao, quantidade, preco_medio from ordens where id = $1', [ordemErro!.id]);
+    expect(conciliada).toMatchObject({ situacao: 'executada', quantidade: 5, preco_medio: 16.1 });
+    const [posicao] = await db.query<{ quantidade: number }>('select quantidade from posicoes where estrategia_id = $1', [estId]);
+    expect(Number(posicao!.quantidade)).toBe(5);
+    await db.query('delete from posicoes where estrategia_id = $1', [estId]);
   });
 
   it('assistente B3: conta sem chave, cotação do Yahoo, Telegram pareado e avisos confirmados pelo dono', async () => {

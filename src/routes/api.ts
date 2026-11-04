@@ -12,7 +12,7 @@ import { desligarTelegram, enviar as enviarTelegram, lerTelegram, salvarToken } 
 import { criarPilotoPadrao, POR_MOEDA, POR_MOEDA_REPIQUE } from '../piloto/index.js';
 import { PONTE_ONLINE_MS, QUOTEX, type Binaria } from '../binarias/index.js';
 import { agrupar } from '../diagnostico.js';
-import { operacoesFechadas, porDia, resumoDoResultado, type OrdemExecutada } from '../resultado.js';
+import { operacoesFechadas, porDia, resumoDoResultado, saldoDaConta, type OrdemExecutada } from '../resultado.js';
 import { moedas } from '../brokers/tipos.js';
 import { iniciarAnalise } from '../analise/index.js';
 import { agentePronto, iniciarTeste, lerConfig, salvarConfig, type ConfigAgente } from '../agente/index.js';
@@ -128,7 +128,7 @@ function urlWebhook(token: string): string {
 api.get('/resultado', async (req, res) => {
   const modo = ['real', 'simulacao', 'todos'].includes(String(req.query.modo)) ? String(req.query.modo) : 'real';
   const ordens = await query<OrdemExecutada>(
-    `select o.estrategia_id, e.nome as estrategia, o.simbolo, o.lado, o.modo, o.quantidade, o.custo, o.taxa, o.criada_em
+    `select o.estrategia_id, o.conta_id, e.nome as estrategia, o.simbolo, o.lado, o.modo, o.quantidade, o.custo, o.taxa, o.criada_em
        from ordens o join estrategias e on e.id = o.estrategia_id
       where o.situacao = 'executada' and ($1 = 'todos' or o.modo = $1)
       order by o.criada_em limit 50000`,
@@ -143,7 +143,58 @@ api.get('/resultado', async (req, res) => {
       return { moeda, ...resumoDoResultado(daMoeda, agora, config.fuso), por_dia: porDia(daMoeda, agora, config.fuso, 30) };
     })
     .sort((a, b) => b.operacoes - a.operacoes);
-  res.json({ modo, moedas: porMoeda, ultimas: ops.slice(-15).reverse() });
+  res.json({ modo, moedas: porMoeda, ultimas: ops.slice(-15).reverse(), saldos: await saldosDasContas(agora) });
+});
+
+/**
+ * O saldo de cada conta real a partir do que o dono colocou (capital_inicial): + o resultado das
+ * operações reais fechadas + o aberto (posições a preço de agora menos o custo). Conta sem capital
+ * aparece para o painel pedir o valor.
+ */
+async function saldosDasContas(agora: Date) {
+  const contas = await query<{ id: number; nome: string; exchange: string; capital_inicial: number | null }>(
+    `select id, nome, exchange, capital_inicial from contas where modo = 'real' and exchange <> $1 order by nome`,
+    [QUOTEX],
+  );
+  if (!contas.length) return [];
+  const ordens = await query<OrdemExecutada>(
+    `select o.estrategia_id, o.conta_id, e.nome as estrategia, o.simbolo, o.lado, o.modo, o.quantidade, o.custo, o.taxa, o.criada_em
+       from ordens o join estrategias e on e.id = o.estrategia_id
+      where o.situacao = 'executada' and o.modo = 'real' and o.conta_id = any($1) order by o.criada_em limit 50000`,
+    [contas.map((c) => c.id)],
+  );
+  const abertas = await query<{ conta_id: number; exchange: string; simbolo: string; quantidade: number; custo_total: number }>(
+    `select e.conta_id, c.exchange, e.simbolo, p.quantidade, p.custo_total from posicoes p join estrategias e on e.id = p.estrategia_id
+       join contas c on c.id = e.conta_id where p.quantidade > 0 and c.id = any($1) and e.real`,
+    [contas.map((c) => c.id)],
+  );
+  const valorAberto = await Promise.all(abertas.map(async (p) => {
+    const preco = await cotacaoPublica(p.exchange, p.simbolo).catch(() => null);
+    return { conta_id: p.conta_id, moeda: (p.simbolo.split('/')[1] ?? '').split(':')[0]!, aberto: preco ? Number(p.quantidade) * preco - Number(p.custo_total) : 0 };
+  }));
+  const ops = operacoesFechadas(ordens);
+  return contas.map((c) => {
+    // o saldo é na moeda principal da conta (a das operações dela; sem operação, BRL)
+    const daConta = ops.filter((o) => o.conta_id === c.id);
+    const moedas = new Map<string, number>();
+    for (const o of daConta) moedas.set(o.moeda, (moedas.get(o.moeda) ?? 0) + 1);
+    const moeda = [...moedas.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'BRL';
+    const emAberto = valorAberto.filter((v) => v.conta_id === c.id && v.moeda === moeda).reduce((t, v) => t + v.aberto, 0);
+    return {
+      conta_id: c.id, nome: c.nome, exchange: c.exchange, moeda,
+      ...(c.capital_inicial === null ? { capital: null } : saldoDaConta(Number(c.capital_inicial), daConta.filter((o) => o.moeda === moeda), emAberto, agora, config.fuso, 30)),
+    };
+  });
+}
+
+/** Quanto o dono colocou na conta (a base do "tinha 50, agora 52" do painel). */
+api.put('/contas/:id/capital', async (req, res) => {
+  const contaId = id(req);
+  const d = validar(z.object({ capital_inicial: z.number().min(0).max(1e12).nullable() }), req.body);
+  const r = await query('update contas set capital_inicial = $2 where id = $1 returning id', [contaId, d.capital_inicial]);
+  if (!r.length) return void res.status(404).json({ erro: 'conta não existe' });
+  await evento(req.usuarioId, 'capital_inicial', { conta: contaId, capital_inicial: d.capital_inicial });
+  res.json({ ok: true });
 });
 
 /** O que o painel ao vivo mostra, a cada poucos segundos: números de hoje e os últimos sinais e ordens. */
@@ -172,6 +223,19 @@ api.get('/ao-vivo', async (_req, res) => {
   res.json({ agora: new Date().toISOString(), hoje: hoje[0], exposicao: exposicao[0], eventos });
 });
 
+/** Ações em que o MetaTrader e o bot discordam da quantidade (ex.: ordem que saiu sem o bot saber). */
+function divergenciasMt5(noMt5: Record<string, number>, doBot: { simbolo: string; quantidade: number }[]) {
+  const bot = new Map<string, number>();
+  for (const p of doBot) {
+    const codigo = p.simbolo.split('/')[0]!.toUpperCase();
+    bot.set(codigo, (bot.get(codigo) ?? 0) + Number(p.quantidade));
+  }
+  const codigos = new Set([...Object.keys(noMt5).filter((k) => Number(noMt5[k]) !== 0), ...bot.keys()]);
+  return [...codigos]
+    .map((codigo) => ({ codigo, no_mt5: Number(noMt5[codigo] ?? 0), no_bot: bot.get(codigo) ?? 0 }))
+    .filter((d) => Math.abs(d.no_mt5 - d.no_bot) > 1e-9);
+}
+
 /** Por que não está comprando: a última passada de cada estratégia em grupos e os motivos de hoje. */
 api.get('/diagnostico', async (_req, res) => {
   const [estrategias, sinais, motivos, pontes] = await Promise.all([
@@ -190,11 +254,17 @@ api.get('/diagnostico', async (_req, res) => {
         group by 1, 2 order by 3 desc limit 6`,
       [config.fuso],
     ),
-    query<{ nome: string; ponte_visto_em: Date | null; ponte_info: Record<string, unknown> | null }>(
-      `select nome, ponte_visto_em, ponte_info from contas where exchange = $1`,
+    query<{ id: number; nome: string; ponte_visto_em: Date | null; ponte_info: Record<string, unknown> | null }>(
+      `select id, nome, ponte_visto_em, ponte_info from contas where exchange = $1`,
       [MT5],
     ),
   ]);
+  // o que o bot acha que tem em cada conta MT5, para comparar com o que o MetaTrader mostra
+  const posicoesBot = await query<{ conta_id: number; simbolo: string; quantidade: number }>(
+    `select e.conta_id, e.simbolo, p.quantidade from posicoes p join estrategias e on e.id = p.estrategia_id
+       join contas c on c.id = e.conta_id where c.exchange = $1 and p.quantidade > 0`,
+    [MT5],
+  );
   res.json({
     real_no_servidor: config.realLiberadoNoServidor,
     estrategias: { total: estrategias.length, em_real: estrategias.filter((e) => e.real && e.conta_modo === 'real').length },
@@ -206,6 +276,7 @@ api.get('/diagnostico', async (_req, res) => {
       online: Boolean(c.ponte_visto_em && Date.now() - new Date(c.ponte_visto_em).getTime() < 60_000),
       saldo: (c.ponte_info?.saldo as number | undefined) ?? null,
       saldo_livre: (c.ponte_info?.saldo_livre as number | undefined) ?? null,
+      divergencias: divergenciasMt5((c.ponte_info?.posicoes as Record<string, number> | undefined) ?? {}, posicoesBot.filter((p) => p.conta_id === c.id)),
     })),
   });
 });
