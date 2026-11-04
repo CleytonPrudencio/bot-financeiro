@@ -32,6 +32,8 @@ export interface PedidoParecer {
   posicao: { quantidade: number; custo_total: number };
   gasto_hoje: number;
   limite_diario: number;
+  /** estilo do piloto que pediu a ordem: no repique, comprar na queda é o plano (as etapas sabem disso) */
+  estilo?: 'tendencia' | 'repique';
   /** campos extras do sinal ou do escritório (indicadores, motivo do analista...) */
   extras?: Record<string, unknown>;
 }

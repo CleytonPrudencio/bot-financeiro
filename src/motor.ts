@@ -284,6 +284,7 @@ export async function processarSinalDa(estrategiaId: number, corpo: unknown, ip:
         posicao: parcial.posicao,
         gasto_hoje: parcial.gastoHoje,
         limite_diario: est.limite_diario,
+        ...(est.auto_ligado ? { estilo: est.auto_estilo } : {}),
       };
       if (est.ia_tipo === 'agente') {
         const todos = (await c.query<ConectorIa>('select * from conectores_ia where ativo')).rows;

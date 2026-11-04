@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { afinidade, ETAPAS, etapaDaPrevisao, lerEtapa, montarAutomatico, relatorios, sistemaDaEtapa, type ConectorResumido } from '../src/agente/etapas.js';
+import { afinidade, ETAPAS, etapaDaPrevisao, lerEtapa, montarAutomatico, relatorios, sistemaDaEtapa, sistemaDecisao, SISTEMA_DECISAO, type ConectorResumido } from '../src/agente/etapas.js';
 
 const conector = (id: number, provedor: 'anthropic' | 'openai', modelo: string, url_base: string | null = null): ConectorResumido => ({ id, provedor, modelo, url_base, ativo: true });
 
@@ -79,5 +79,17 @@ describe('previsão do Kronos como etapa', () => {
   });
   it('resumo com mediana, faixa e chance', () => {
     expect(etapaDaPrevisao(p(0.62), 'compra').resumo).toBe('Em 5 dias o Kronos projeta +1.20% (mediana), com faixa de -3.00% a +4.00% e 62% de chance de terminar acima de hoje.');
+  });
+});
+
+describe('estratégia de repique no agente', () => {
+  it('as etapas e a decisão sabem que comprar na queda é o plano', () => {
+    const tecnica = ETAPAS.find((e) => e.id === 'tecnica')!;
+    expect(sistemaDaEtapa(tecnica, false, new Date(), 'repique')).toContain('REPIQUE');
+    expect(sistemaDaEtapa(tecnica, false, new Date(), 'tendencia')).not.toContain('REPIQUE');
+    expect(sistemaDaEtapa(tecnica, false)).not.toContain('REPIQUE');
+    expect(sistemaDecisao('repique')).toContain('não só pela tendência de baixa');
+    expect(sistemaDecisao('tendencia')).toBe(SISTEMA_DECISAO);
+    expect(sistemaDecisao()).toBe(SISTEMA_DECISAO);
   });
 });
