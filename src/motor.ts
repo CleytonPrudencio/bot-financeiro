@@ -72,6 +72,8 @@ export interface Estrategia {
   auto_varrido_em: Date | null;
   auto_exigir_virada: boolean;
   auto_estilo: 'tendencia' | 'repique';
+  auto_stop_atr: boolean;
+  auto_stop_atr_mult: number;
 }
 
 /** "IP" das ordens que o dono manda pelo painel (botões Comprar e Vender da estratégia). */
@@ -287,7 +289,15 @@ export async function processarSinalDa(estrategiaId: number, corpo: unknown, ip:
         ...(est.auto_ligado ? { estilo: est.auto_estilo } : {}),
         // o porquê do piloto (ex.: "repique: IFR saiu de 24 e a vela fechou em alta"), como informação
         ...(ip === 'piloto' && typeof (corpo as { motivo?: unknown })?.motivo === 'string'
-          ? { extras: { motivo_do_piloto: String((corpo as { motivo: string }).motivo).slice(0, 300), tempo_das_velas: est.auto_tempo } }
+          ? {
+              extras: {
+                motivo_do_piloto: String((corpo as { motivo: string }).motivo).slice(0, 300),
+                tempo_das_velas: est.auto_tempo,
+                // o stop e o alvo desta compra (pela volatilidade da moeda, quando ligado)
+                ...(typeof (corpo as { stop_pct?: unknown }).stop_pct === 'number' ? { stop_pct: (corpo as { stop_pct: number }).stop_pct } : {}),
+                ...(typeof (corpo as { alvo_pct?: unknown }).alvo_pct === 'number' ? { alvo_pct: (corpo as { alvo_pct: number }).alvo_pct } : {}),
+              },
+            }
           : {}),
       };
       if (est.ia_tipo === 'agente') {
@@ -370,7 +380,8 @@ export async function processarSinalDa(estrategiaId: number, corpo: unknown, ip:
         const motivo = `${e.message}: fica na carteira como poeira e a posição foi zerada`;
         logger.warn({ estrategia: est.id, quantidade: e.quantidade }, 'posição zerada: resto abaixo do mínimo da exchange');
         await c.query(
-          `update posicoes set quantidade = 0, custo_total = 0, maior_preco = null, stop_avisado = null, atualizada_em = now() where estrategia_id = $1`,
+          `update posicoes set quantidade = 0, custo_total = 0, maior_preco = null, stop_avisado = null, stop_pct = null, alvo_pct = null,
+                  protecao_pct = null, recuo_pct = null, atualizada_em = now() where estrategia_id = $1`,
           [est.id],
         );
         await gravarConsultas(await registrarSinal(c, est.id, sinal, corpo, ip, 'ignorado', motivo));
@@ -456,7 +467,11 @@ export async function atualizarPosicao(
     `insert into posicoes (estrategia_id, quantidade, custo_total, atualizada_em) values ($1, $2, $3, now())
      on conflict (estrategia_id) do update set quantidade = $2, custo_total = $3, atualizada_em = now(),
        maior_preco = case when $2 = 0 or posicoes.quantidade = 0 then null else posicoes.maior_preco end,
-       stop_avisado = case when $2 = 0 or posicoes.quantidade = 0 then null else posicoes.stop_avisado end`,
+       stop_avisado = case when $2 = 0 or posicoes.quantidade = 0 then null else posicoes.stop_avisado end,
+       stop_pct = case when $2 = 0 or posicoes.quantidade = 0 then null else posicoes.stop_pct end,
+       alvo_pct = case when $2 = 0 or posicoes.quantidade = 0 then null else posicoes.alvo_pct end,
+       protecao_pct = case when $2 = 0 or posicoes.quantidade = 0 then null else posicoes.protecao_pct end,
+       recuo_pct = case when $2 = 0 or posicoes.quantidade = 0 then null else posicoes.recuo_pct end`,
     [estrategiaId, quantidade, custo],
   );
 }

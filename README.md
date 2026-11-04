@@ -174,6 +174,10 @@ Para quem não tem TradingView: o próprio bot gera os sinais das estratégias c
 (`src/piloto/`) e manda pelo mesmo caminho do webhook (`processarSinalDa`). Então valem todas as
 regras de risco, a trava por estratégia, o agente de IA nas compras e as três chaves do dinheiro real.
 
+- **Stop pela volatilidade** (`auto_stop_atr`): na compra, o piloto mede o ATR da moeda no tempo da
+  estratégia e fixa stop = ATR x `auto_stop_atr_mult` (padrão 3, entre 0,8% e 6%), alvo = 1,5x o
+  stop e a proteção junto (`regrasPelaVolatilidade`). Ficam na posição (`posicoes.stop_pct`...) até ela
+  zerar; sem ATR, vale o stop fixo da estratégia.
 - **Quando olha**: sem posição, a cada `auto_intervalo_min` (padrão 2 min), sempre na última vela
   **fechada** do tempo escolhido (1 min, 5 min, 15 min, 1 h, 4 h ou 1 dia).
 - **Onde olha**: no par da estratégia ou, com **"procurar em todos os pares da moeda"**, em todos os

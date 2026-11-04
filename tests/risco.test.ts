@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { avaliar, conferirSaida, consultaIa, decidirComIa, deveAvisarStop, ipPermitido, PISO_PROTECAO, stopSugerido, type EstadoRisco, type PoliticaIa } from '../src/risco.js';
+import { avaliar, conferirSaida, regrasPelaVolatilidade, consultaIa, decidirComIa, deveAvisarStop, ipPermitido, PISO_PROTECAO, stopSugerido, type EstadoRisco, type PoliticaIa } from '../src/risco.js';
 import type { Sinal } from '../src/sinal.js';
 
 function estado(mudar: Partial<EstadoRisco> = {}, est: Partial<EstadoRisco['estrategia']> = {}): EstadoRisco {
@@ -237,5 +237,24 @@ describe('poeira: resto pequeno demais para a exchange vender', () => {
     expect(motivoPoeira(1_753_861, 0.00002818, { quantidade: 1, valor: 5 })).toBeNull();
     expect(motivoPoeira(0.5, 100, { quantidade: 1 })).toContain('quantidade mínima');
     expect(motivoPoeira(10, 0.1, { valor: 5 })).toContain('valor mínimo');
+  });
+});
+
+describe('stop pela volatilidade de cada moeda (ATR)', () => {
+  it('stop = ATR x 3, com piso e teto; alvo 1,5x o stop', () => {
+    expect(regrasPelaVolatilidade(0.5)).toEqual({ stopPct: 1.5, alvoPct: 2.25, protecaoPct: 1.24, recuoPct: 0.6 });
+    expect(regrasPelaVolatilidade(0.1)!.stopPct).toBe(0.8); // moeda calma: piso
+    expect(regrasPelaVolatilidade(4)!.stopPct).toBe(6); // moeda muito agitada: teto
+    expect(regrasPelaVolatilidade(0.5, { mult: 2 })!.stopPct).toBe(1);
+  });
+  it('sem ATR, fica o stop fixo da estratégia', () => {
+    expect(regrasPelaVolatilidade(null)).toBeNull();
+    expect(regrasPelaVolatilidade(0)).toBeNull();
+    expect(regrasPelaVolatilidade(Number.NaN)).toBeNull();
+  });
+  it('a saída usa as regras calculadas', () => {
+    const r = regrasPelaVolatilidade(0.5)!;
+    expect(conferirSaida(100, 98.6, 100, r)).toEqual({ sair: false });
+    expect(conferirSaida(100, 98.5, 100, r)).toMatchObject({ sair: true, tipo: 'stop' });
   });
 });

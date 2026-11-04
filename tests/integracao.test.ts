@@ -466,7 +466,7 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     const [conta] = await db.query<{ id: number }>(`select id from contas where nome = 'Binance simulada'`);
     const est = await painel('POST', '/estrategias', {
       nome: 'Varredura', conta_id: conta!.id, simbolo: 'BTC/BRL', ativa: true, valor_ordem: 10, limite_por_ordem: 10, limite_diario: 10,
-      intervalo_min_seg: 0, auto_ligado: true, auto_varrer: true, auto_tempo: '15m', auto_intervalo_min: 2,
+      intervalo_min_seg: 0, auto_ligado: true, auto_varrer: true, auto_tempo: '15m', auto_intervalo_min: 2, auto_stop_atr: true,
     });
     expect(est.status).toBe(201);
     try {
@@ -476,11 +476,15 @@ describe.skipIf(!URL_BANCO)('fluxo completo em simulação', () => {
     }
     const [e] = await db.query<{ simbolo: string; auto_situacao: string }>('select simbolo, auto_situacao from estrategias where id = $1', [est.corpo.id]);
     expect(e!.simbolo).toBe('ETH/BRL');
-    expect(e!.auto_situacao).toMatch(/^ETH\/BRL: virada para alta.*Kronos 72% de alta → executado/);
+    expect(e!.auto_situacao).toMatch(/^ETH\/BRL: virada para alta.*Kronos 72% de alta.*→ executado/);
     const [ultimo] = await db.query<{ situacao: string; corpo: { simbolo: string; id: string } }>(
       'select situacao, corpo from sinais where estrategia_id = $1 order by id desc limit 1', [est.corpo.id]);
     expect(ultimo).toMatchObject({ situacao: 'executado', corpo: { simbolo: 'ETH/BRL' } });
     expect(ultimo!.corpo.id).toMatch(/^piloto-entrada-ETH\/BRL-/);
+    // stop pela volatilidade: as velas do teste oscilam ~2% cada, então o stop vai ao teto (6%) e o alvo a 1,5x
+    const [pos] = await db.query<{ stop_pct: number; alvo_pct: number }>('select stop_pct, alvo_pct from posicoes where estrategia_id = $1', [est.corpo.id]);
+    expect(pos).toMatchObject({ stop_pct: 6, alvo_pct: 9 });
+    expect(e!.auto_situacao).toContain('pela volatilidade');
 
     // na passada seguinte, dentro dos 2 minutos, não varre de novo; com posição, só cuida do stop
     await rodadaPiloto();

@@ -8,7 +8,8 @@ import type { Vela } from '../analise/indicadores.js';
 import { moedas } from '../brokers/tipos.js';
 import { corretoraReal, processarSinalDa, type Conta, type Estrategia, type Resultado } from '../motor.js';
 import { kronosLigado, preverKronos } from '../previsao/kronos.js';
-import { conferirSaida, deveAvisarStop, stopSugerido } from '../risco.js';
+import { conferirSaida, deveAvisarStop, regrasPelaVolatilidade, stopSugerido, type RegrasSaida } from '../risco.js';
+import { atrPct } from '../analise/indicadores.js';
 import { avaliarEntrada, avaliarRepique, b3Aberta, cabeUmaAcao, valorParaComprar, DIA_MS, filtroDiario, KRONOS_MIN_ALTA, tendenciaQuebrou, velasFechadas } from './regras.js';
 
 // Piloto automático: o bot gera os próprios sinais das estratégias com "piloto ligado" e manda pelo
@@ -35,9 +36,29 @@ interface EstrategiaPiloto extends Estrategia {
   custo_total: number;
   maior_preco: number | null;
   stop_avisado: number | null;
+  /** as regras de saída fixadas na compra (stop pela volatilidade); null = as da estratégia */
+  pos_stop_pct: number | null;
+  pos_alvo_pct: number | null;
+  pos_protecao_pct: number | null;
+  pos_recuo_pct: number | null;
 }
 
 const pct = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
+
+/** As regras de saída da estratégia (o stop fixo). */
+const regrasDa = (e: EstrategiaPiloto): RegrasSaida => ({
+  stopPct: Number(e.auto_stop_pct), alvoPct: Number(e.auto_alvo_pct), protecaoPct: Number(e.auto_protecao_pct), recuoPct: Number(e.auto_recuo_pct),
+});
+/** As da posição aberta: as fixadas na compra (pela volatilidade) ou, sem elas, as da estratégia. */
+function regrasDaPosicao(e: EstrategiaPiloto): RegrasSaida {
+  const base = regrasDa(e);
+  return {
+    stopPct: e.pos_stop_pct === null ? base.stopPct : Number(e.pos_stop_pct),
+    alvoPct: e.pos_alvo_pct === null ? base.alvoPct : Number(e.pos_alvo_pct),
+    protecaoPct: e.pos_protecao_pct === null ? base.protecaoPct : Number(e.pos_protecao_pct),
+    recuoPct: e.pos_recuo_pct === null ? base.recuoPct : Number(e.pos_recuo_pct),
+  };
+}
 const textoResultado = (r: Resultado) => (r.status === 404 ? 'estratégia sumiu' : `${r.situacao}${r.motivo ? `: ${r.motivo}` : ''}`);
 
 const operaReal = (e: EstrategiaPiloto) => e.real && e.conta_modo === 'real' && config.realLiberadoNoServidor;
@@ -143,6 +164,8 @@ interface Candidato {
   vela: number;
   motivo: string;
   prob: number | null;
+  /** oscilação média por vela (%), para o stop pela volatilidade */
+  atr: number | null;
 }
 
 async function cuidar(e: EstrategiaPiloto, agora: number): Promise<void> {
@@ -236,7 +259,7 @@ async function cuidar(e: EstrategiaPiloto, agora: number): Promise<void> {
       }
     }
     anotar(simbolo, `${entrada.motivo}${prob !== null ? `; Kronos ${Math.round(prob * 100)}% de alta` : ''}`, true, fechamento);
-    candidatos.push({ simbolo, vela, motivo: entrada.motivo, prob });
+    candidatos.push({ simbolo, vela, motivo: entrada.motivo, prob, atr: atrPct(fechadas) });
   }
   await gravarVarredura(e.id, olhados);
 
@@ -254,13 +277,26 @@ async function cuidar(e: EstrategiaPiloto, agora: number): Promise<void> {
   const valor = await valorDaCompra({ ...e, simbolo: melhor.simbolo });
   const kronos = melhor.prob !== null ? `, Kronos ${Math.round(melhor.prob * 100)}% de alta` : '';
   if (valor === null) return situacao(e.id, `${melhor.simbolo}: ${melhor.motivo}${kronos}, mas não há saldo livre para comprar`);
+  // stop pela volatilidade: a saída desta operação sai do ATR da moeda agora (fica na posição)
+  const pelaVolatilidade = e.auto_stop_atr ? regrasPelaVolatilidade(melhor.atr, { mult: Number(e.auto_stop_atr_mult) }) : null;
+  const saidas = pelaVolatilidade ?? regrasDa(e);
   const r = await processarSinalDa(
     e.id,
-    { acao: 'comprar', simbolo: melhor.simbolo, preco, valor, id: `piloto-entrada-${melhor.simbolo}-${melhor.vela}`, motivo: `${melhor.motivo}${kronos}` },
+    {
+      acao: 'comprar', simbolo: melhor.simbolo, preco, valor, id: `piloto-entrada-${melhor.simbolo}-${melhor.vela}`, motivo: `${melhor.motivo}${kronos}`,
+      stop_pct: saidas.stopPct, alvo_pct: saidas.alvoPct,
+    },
     ORIGEM,
   );
-  logger.info({ estrategia: e.id, simbolo: melhor.simbolo, resultado: textoResultado(r) }, 'piloto: entrada');
-  return situacao(e.id, `${melhor.simbolo}: ${melhor.motivo}${kronos} → ${textoResultado(r)}`);
+  if (pelaVolatilidade && r.status !== 404 && r.situacao === 'executado') {
+    await query(
+      `update posicoes set stop_pct = $2, alvo_pct = $3, protecao_pct = $4, recuo_pct = $5 where estrategia_id = $1 and quantidade > 0`,
+      [e.id, saidas.stopPct, saidas.alvoPct, saidas.protecaoPct, saidas.recuoPct],
+    );
+  }
+  logger.info({ estrategia: e.id, simbolo: melhor.simbolo, resultado: textoResultado(r), saidas }, 'piloto: entrada');
+  const comVol = pelaVolatilidade ? ` (stop -${saidas.stopPct}% e alvo +${saidas.alvoPct}% pela volatilidade, ATR ${melhor.atr?.toFixed(2)}% por vela)` : '';
+  return situacao(e.id, `${melhor.simbolo}: ${melhor.motivo}${kronos}${comVol} → ${textoResultado(r)}`);
 }
 
 /** Com posição: a cada passada, stop, alvo e proteção; uma vez por vela diária, a saída por tendência. */
@@ -276,7 +312,7 @@ async function cuidarDaPosicao(e: EstrategiaPiloto, agora: number): Promise<void
     const r = await processarSinalDa(e.id, { acao: 'zerar', simbolo: e.simbolo, preco, id: `piloto-poeira-${agora}`, motivo: 'resto pequeno demais (poeira)' }, ORIGEM);
     return situacao(e.id, `${e.simbolo}: sobrou só um resto pequeno demais da última venda → ${textoResultado(r)}`);
   }
-  const regras = { stopPct: e.auto_stop_pct, alvoPct: e.auto_alvo_pct, protecaoPct: e.auto_protecao_pct, recuoPct: e.auto_recuo_pct };
+  const regras = regrasDaPosicao(e);
   const maior = p?.maior_preco ?? preco;
   const saida = conferirSaida(precoMedio, preco, maior, regras);
   // assistente: enquanto o dono não responde o aviso, não repete; o stop dele está registrado na corretora
@@ -295,7 +331,7 @@ async function cuidarDaPosicao(e: EstrategiaPiloto, agora: number): Promise<void
     logger.info({ estrategia: e.id, tipo: saida.tipo, resultado: textoResultado(r) }, 'piloto: saída');
     return situacao(e.id, `${e.simbolo}: ${saida.motivo} → ${textoResultado(r)}`);
   }
-  const texto = `${e.simbolo}: posição aberta, ${pct((preco / precoMedio - 1) * 100)} desde a compra; stop em ${(precoMedio * (1 - e.auto_stop_pct / 100)).toPrecision(6)}`;
+  const texto = `${e.simbolo}: posição aberta, ${pct((preco / precoMedio - 1) * 100)} desde a compra; stop em ${(precoMedio * (1 - regras.stopPct / 100)).toPrecision(6)} (-${regras.stopPct}%)`;
 
   const ultimaDiaria = Math.floor(agora / DIA_MS) * DIA_MS - DIA_MS;
   if (e.auto_estilo !== 'repique' && (tendenciaConferida.get(e.id) ?? 0) < ultimaDiaria) {
@@ -315,7 +351,8 @@ export async function rodadaPiloto(agora = Date.now()): Promise<void> {
   await garantirEstrategiaPadrao();
   const estrategias = await query<EstrategiaPiloto>(
     `select e.*, c.exchange, c.modo as conta_modo,
-            coalesce(p.quantidade, 0) as quantidade, coalesce(p.custo_total, 0) as custo_total, p.maior_preco, p.stop_avisado
+            coalesce(p.quantidade, 0) as quantidade, coalesce(p.custo_total, 0) as custo_total, p.maior_preco, p.stop_avisado,
+            p.stop_pct as pos_stop_pct, p.alvo_pct as pos_alvo_pct, p.protecao_pct as pos_protecao_pct, p.recuo_pct as pos_recuo_pct
        from estrategias e join contas c on c.id = e.conta_id left join posicoes p on p.estrategia_id = e.id
       where e.ativa and e.auto_ligado order by e.id`,
   );
@@ -393,6 +430,8 @@ export interface OpcoesPiloto {
   alvo?: number;
   protecao?: number;
   recuo?: number;
+  /** stop pela volatilidade da moeda (ATR x 3) em vez do stop fixo */
+  stopAtr?: boolean;
 }
 
 /**
@@ -407,13 +446,14 @@ export async function criarPilotoPadrao(contaId: number, nome: string, simbolo: 
                               limite_diario, limite_posicao, intervalo_min_seg, desvio_max_pct,
                               ia_modo, ia_tipo, ia_falha, ia_confianca_min, ia_nas_vendas, ia_contexto,
                               auto_ligado, auto_stop_pct, auto_alvo_pct, auto_protecao_pct, auto_recuo_pct,
-                              auto_varrer, auto_tempo, auto_intervalo_min, auto_exigir_virada, auto_max_ia_dia, auto_estilo)
+                              auto_varrer, auto_tempo, auto_intervalo_min, auto_exigir_virada, auto_max_ia_dia, auto_estilo, auto_stop_atr)
      values ($1, $2, $3, true, false, $4, $5, $6, $6, $6, $6, $7, $8,
              'obrigatorio', 'agente', 'reprova', 0.6, false, $9,
-             true, $10, $11, $12, $13, $16, $14, $15, false, $17, $18) returning id`,
+             true, $10, $11, $12, $13, $16, $14, $15, false, $17, $18, $19) returning id`,
     [nome, contaId, simbolo, t.hash, t.prefixo, valor, PADRAO.intervalo_min_seg, PADRAO.desvio_max_pct,
       opcoes.contexto ?? PADRAO.ia_contexto, opcoes.stop ?? PADRAO.stop, opcoes.alvo ?? PADRAO.alvo, opcoes.protecao ?? PADRAO.protecao, opcoes.recuo ?? PADRAO.recuo,
-      opcoes.tempo ?? PADRAO.tempo, opcoes.intervaloMin ?? PADRAO.intervalo_min, opcoes.varrer ?? true, opcoes.maxIaDia ?? 6, opcoes.estilo ?? 'tendencia'],
+      opcoes.tempo ?? PADRAO.tempo, opcoes.intervaloMin ?? PADRAO.intervalo_min, opcoes.varrer ?? true, opcoes.maxIaDia ?? 6, opcoes.estilo ?? 'tendencia',
+      opcoes.stopAtr ?? false],
   );
   await query(
     `insert into saldos_simulados (conta_id, moeda, quantidade) values ($1, 'BRL', $2) on conflict (conta_id, moeda) do nothing`,
@@ -423,7 +463,7 @@ export async function criarPilotoPadrao(contaId: number, nome: string, simbolo: 
 }
 
 /** Valores das estratégias "uma por moeda": velas de 1 min, stop curto, pouca IA por moeda (custo). */
-export const POR_MOEDA: OpcoesPiloto = { tempo: '1m', intervaloMin: 1, varrer: false, valor: 15, maxIaDia: 2, stop: 1.5, alvo: 3, protecao: 1.2, recuo: 0.6 };
+export const POR_MOEDA: OpcoesPiloto = { tempo: '1m', intervaloMin: 1, varrer: false, valor: 15, maxIaDia: 2, stop: 1.5, alvo: 3, protecao: 1.2, recuo: 0.6, stopAtr: true };
 
 /** O mesmo, no estilo repique: alvo e stop curtos e o agente sabendo que comprar na queda é o plano. */
 export const POR_MOEDA_REPIQUE: OpcoesPiloto = {
@@ -434,7 +474,7 @@ export const POR_MOEDA_REPIQUE: OpcoesPiloto = {
   protecao: 0.8,
   recuo: 0.4,
   contexto:
-    'Estratégia de REPIQUE: compra a moeda que caiu demais (IFR abaixo de 30) quando a vela volta a fechar em alta, para um ganho curto (alvo +1,5%, stop -1%). A tendência de baixa no dia é esperada nesta estratégia e não é motivo para vetar sozinha. Vete se houver notícia grave, queda descontrolada ou risco claro de continuar caindo forte.',
+    'Estratégia de REPIQUE: compra a moeda que caiu demais (IFR abaixo de 30) quando a vela volta a fechar em alta, para um ganho curto (alvo e stop curtos; os desta compra vão na ordem). A tendência de baixa no dia é esperada nesta estratégia e não é motivo para vetar sozinha. Vete se houver notícia grave, queda descontrolada ou risco claro de continuar caindo forte.',
 };
 
 export async function garantirEstrategiaPadrao(): Promise<number | null> {

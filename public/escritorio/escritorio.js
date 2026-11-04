@@ -1239,7 +1239,11 @@ export function montarEscritorio(raiz, opcoes = {}) {
       selos.push(h('span', { class: `selo-mini ${e.operando_real ? 'perigo' : 'alerta'}` }, e.operando_real ? 'dinheiro REAL' : 'simulação'));
       if (a.olheiro) selos.push(h('span', { class: 'selo-mini' }, 'olheiro: o piloto está de olho'));
       if (e.auto_ligado) selos.push(h('span', { class: 'selo-mini' }, `piloto ${e.auto_estilo === 'repique' ? 'repique' : 'tendência'}${e.auto_tempo ? ` · velas de ${e.auto_tempo}` : ''}`));
-      if (e.auto_ligado && e.auto_stop_pct) selos.push(h('span', { class: 'selo-mini' }, `stop -${Number(e.auto_stop_pct).toLocaleString('pt-BR')}% · alvo +${Number(e.auto_alvo_pct).toLocaleString('pt-BR')}%`));
+      if (e.auto_ligado && e.pos_stop_pct !== null && e.pos_stop_pct !== undefined && temPosicao) {
+        selos.push(h('span', { class: 'selo-mini ok' }, `nesta operação: stop -${Number(e.pos_stop_pct).toLocaleString('pt-BR')}% · alvo +${Number(e.pos_alvo_pct).toLocaleString('pt-BR')}% (volatilidade)`));
+      } else if (e.auto_ligado && e.auto_stop_atr) {
+        selos.push(h('span', { class: 'selo-mini' }, `stop pela volatilidade (ATR x ${Number(e.auto_stop_atr_mult).toLocaleString('pt-BR')})`));
+      } else if (e.auto_ligado && e.auto_stop_pct) selos.push(h('span', { class: 'selo-mini' }, `stop -${Number(e.auto_stop_pct).toLocaleString('pt-BR')}% · alvo +${Number(e.auto_alvo_pct).toLocaleString('pt-BR')}%`));
     }
     const grafico = h('canvas', { class: 'detalhe-grafico', role: 'img', 'aria-label': `Gráfico de ${a.simbolo}` });
     const linhasDecisao = entradas.length

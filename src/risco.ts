@@ -226,6 +226,29 @@ export function stopSugerido(precoMedio: number, maiorPreco: number, r: RegrasSa
   return Math.max(maiorPreco * (1 - r.recuoPct / 100), precoMedio * PISO_PROTECAO);
 }
 
+/**
+ * Stop pela volatilidade: com o ATR da moeda (oscilação média por vela, em %), stop = ATR x `mult`,
+ * entre `minPct` e `maxPct`; alvo = stop x `razaoAlvo`; a proteção começa em ~55% do alvo e fecha com
+ * recuo de 40% do stop (as proporções do repique: -1% / +1,5% / 0,8% / 0,4%). Sem ATR, null (vale o
+ * stop fixo da estratégia). Moeda que oscila mais ganha mais espaço, e cada perda fica maior.
+ */
+export interface BaseVolatilidade {
+  mult: number;
+  razaoAlvo: number;
+  minPct: number;
+  maxPct: number;
+}
+export const VOLATILIDADE_PADRAO: BaseVolatilidade = { mult: 3, razaoAlvo: 1.5, minPct: 0.8, maxPct: 6 };
+
+export function regrasPelaVolatilidade(atrPct: number | null, mudar: Partial<BaseVolatilidade> = {}): RegrasSaida | null {
+  if (atrPct === null || !Number.isFinite(atrPct) || atrPct <= 0) return null;
+  const b = { ...VOLATILIDADE_PADRAO, ...mudar };
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const stopPct = r2(Math.min(b.maxPct, Math.max(b.minPct, atrPct * b.mult)));
+  const alvoPct = r2(stopPct * b.razaoAlvo);
+  return { stopPct, alvoPct, protecaoPct: r2(alvoPct * 0.55), recuoPct: r2(stopPct * 0.4) };
+}
+
 /** Vale avisar o dono para subir o stop? Só quando ele sobe pelo menos `passoPct` (0,5%) sobre o último aviso. */
 export function deveAvisarStop(novo: number, ultimoAvisado: number | null, passoPct = 0.5): boolean {
   if (ultimoAvisado === null) return false; // o primeiro stop vai no aviso de compra

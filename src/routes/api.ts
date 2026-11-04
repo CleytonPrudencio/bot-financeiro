@@ -427,6 +427,9 @@ const esquemaEstrategia = z
     auto_max_ia_dia: z.number().int().min(0).max(100).default(6),
     auto_exigir_virada: z.boolean().default(true),
     auto_estilo: z.enum(['tendencia', 'repique']).default('tendencia'),
+    // stop pela volatilidade (ATR x multiplicador) em vez do stop fixo
+    auto_stop_atr: z.boolean().default(false),
+    auto_stop_atr_mult: z.number().min(0.5).max(20).default(3),
   });
 
 function conferirLimites(e: { valor_ordem: number; limite_por_ordem: number; limite_diario: number }): void {
@@ -476,15 +479,17 @@ api.post('/estrategias', async (req, res) => {
                               ia_modo, ia_conectores, ia_quorum, ia_falha, ia_confianca_min, ia_nas_vendas, ia_contexto,
                               analise_nota_min, analise_validade_h, ia_tipo,
                               auto_ligado, auto_stop_pct, auto_alvo_pct, auto_protecao_pct, auto_recuo_pct,
-                              auto_varrer, auto_tempo, auto_intervalo_min, auto_volume_min, auto_max_ia_dia, auto_exigir_virada, auto_estilo)
+                              auto_varrer, auto_tempo, auto_intervalo_min, auto_volume_min, auto_max_ia_dia, auto_exigir_virada, auto_estilo,
+                              auto_stop_atr, auto_stop_atr_mult)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
-             $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36) returning id`,
+             $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38) returning id`,
     [d.nome, d.conta_id, d.simbolo, d.ativa, d.real, t.hash, t.prefixo, d.valor_ordem, d.limite_por_ordem,
       d.limite_diario, d.limite_posicao, d.intervalo_min_seg, d.desvio_max_pct, d.ips_permitidos || null,
       d.ia_modo, d.ia_conectores, d.ia_quorum, d.ia_falha, d.ia_confianca_min, d.ia_nas_vendas, d.ia_contexto || null,
       d.analise_nota_min, d.analise_validade_h, d.ia_tipo,
       d.auto_ligado, d.auto_stop_pct, d.auto_alvo_pct, d.auto_protecao_pct, d.auto_recuo_pct,
-      d.auto_varrer, d.auto_tempo, d.auto_intervalo_min, d.auto_volume_min, d.auto_max_ia_dia, d.auto_exigir_virada, d.auto_estilo],
+      d.auto_varrer, d.auto_tempo, d.auto_intervalo_min, d.auto_volume_min, d.auto_max_ia_dia, d.auto_exigir_virada, d.auto_estilo,
+      d.auto_stop_atr, d.auto_stop_atr_mult],
   );
   await evento(req.usuarioId, 'estrategia_criada', { estrategia: r[0]!.id, real: d.real });
   // o token só aparece agora; no banco fica só o hash
@@ -512,7 +517,7 @@ api.patch('/estrategias/:id', async (req, res) => {
             ia_nas_vendas = $18, ia_contexto = $19, analise_nota_min = $20, analise_validade_h = $21, ia_tipo = $22,
             auto_ligado = $23, auto_stop_pct = $24, auto_alvo_pct = $25, auto_protecao_pct = $26, auto_recuo_pct = $27,
             auto_varrer = $28, auto_tempo = $29, auto_intervalo_min = $30, auto_volume_min = $31, auto_max_ia_dia = $32,
-            auto_exigir_virada = $33, auto_estilo = $34
+            auto_exigir_virada = $33, auto_estilo = $34, auto_stop_atr = $35, auto_stop_atr_mult = $36
       where id = $1`,
     [estId, novo.nome, novo.simbolo, novo.ativa, novo.real, novo.valor_ordem, novo.limite_por_ordem, novo.limite_diario,
       novo.limite_posicao, novo.intervalo_min_seg, novo.desvio_max_pct, novo.ips_permitidos || null,
@@ -520,7 +525,7 @@ api.patch('/estrategias/:id', async (req, res) => {
       novo.ia_contexto || null, novo.analise_nota_min, novo.analise_validade_h, novo.ia_tipo,
       novo.auto_ligado, novo.auto_stop_pct, novo.auto_alvo_pct, novo.auto_protecao_pct, novo.auto_recuo_pct,
       novo.auto_varrer, novo.auto_tempo, novo.auto_intervalo_min, novo.auto_volume_min, novo.auto_max_ia_dia,
-      novo.auto_exigir_virada, novo.auto_estilo],
+      novo.auto_exigir_virada, novo.auto_estilo, novo.auto_stop_atr, novo.auto_stop_atr_mult],
   );
   await evento(req.usuarioId, 'estrategia_alterada', { estrategia: estId, mudou: d });
   res.json({ ok: true });
@@ -682,7 +687,8 @@ api.get('/escritorio', async (_req, res) => {
   }>(
     `select e.id, e.nome, e.simbolo, c.exchange, e.ativa, e.real, c.modo as conta_modo, e.auto_ligado, e.auto_situacao,
             e.auto_checado_em, e.ia_modo, e.ia_tipo, e.valor_ordem, e.auto_varrer, e.auto_varredura,
-            c.nome as conta, e.auto_estilo, e.auto_tempo, e.auto_stop_pct, e.auto_alvo_pct,
+            c.nome as conta, e.auto_estilo, e.auto_tempo, e.auto_stop_pct, e.auto_alvo_pct, e.auto_stop_atr, e.auto_stop_atr_mult,
+            p.stop_pct as pos_stop_pct, p.alvo_pct as pos_alvo_pct,
             coalesce(p.quantidade, 0) as posicao, coalesce(p.custo_total, 0) as custo_posicao
        from estrategias e join contas c on c.id = e.conta_id left join posicoes p on p.estrategia_id = e.id
       order by e.ativa desc, e.id`,
