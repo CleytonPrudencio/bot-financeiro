@@ -361,8 +361,8 @@ export async function paginaPainel({ recarregar, agendar }) {
     ),
     h('div', { class: 'grade-kpi' }, escalonar([
       kpi('Ordens hoje', r.hoje.ordens, { nomeIcone: 'ordens', formato: inteiro, serie: serie.map((d) => Number(d.ordens)), cor: 'var(--primaria)', nota: '14 dias', vivos, chave: 'ordens' }),
-      kpi('Compras hoje', r.hoje.compras, { nomeIcone: 'compra', serie: serie.map((d) => Number(d.compras)), cor: 'var(--ok)', nota: 'moeda de cotação', vivos, chave: 'compras' }),
-      kpi('Vendas hoje', r.hoje.vendas, { nomeIcone: 'venda', serie: serie.map((d) => Number(d.vendas)), cor: 'var(--ciano)', nota: 'líquido de taxa', vivos, chave: 'vendas' }),
+      kpi('Compras hoje', r.hoje.compras, { nomeIcone: 'compra', serie: serie.map((d) => Number(d.compras)), cor: 'var(--ok)', nota: 'soma do dia: o mesmo dinheiro gira', vivos, chave: 'compras' }),
+      kpi('Vendas hoje', r.hoje.vendas, { nomeIcone: 'venda', serie: serie.map((d) => Number(d.vendas)), cor: 'var(--ciano)', nota: 'soma do dia, líquido de taxa', vivos, chave: 'vendas' }),
       kpi('Exposição aberta', exposicao, { nomeIcone: 'contas', nota: 'custo das posições', vivos, chave: 'exposicao' }),
       kpi('Erros hoje', r.hoje.erros, { nomeIcone: 'alerta', formato: inteiro, classe: Number(r.hoje.erros) ? 'kpi-perigo' : '', nota: Number(r.hoje.erros) ? 'veja em Ordens' : 'nenhum', vivos, chave: 'erros' }),
     ])),
