@@ -1,5 +1,5 @@
 import ccxt, { type Exchange, type Order } from 'ccxt';
-import { moedas, type Corretora, type Execucao } from './tipos.js';
+import { ErroPoeira, moedas, motivoPoeira, type Corretora, type Execucao } from './tipos.js';
 
 // Ponte para qualquer exchange suportada pelo CCXT (Binance, Mercado Bitcoin, Bybit, OKX…).
 // Sem chaves, serve só para cotação pública (usada pela simulação).
@@ -135,9 +135,18 @@ export class CorretoraCcxt implements Corretora {
 
   async vender(simbolo: string, quantidade: number, precoRef: number): Promise<Execucao> {
     const ex = await this.ex;
-    const qtd = Number(ex.amountToPrecision(simbolo, quantidade));
+    // a exchange arredonda para baixo no passo dela; abaixo dele, o CCXT lança: aí é tudo poeira
+    let qtd = 0;
+    try {
+      qtd = Number(ex.amountToPrecision(simbolo, quantidade));
+    } catch {
+      qtd = 0;
+    }
+    const limites = ex.markets?.[simbolo]?.limits;
+    const poeira = motivoPoeira(qtd, precoRef, { quantidade: limites?.amount?.min ?? null, valor: limites?.cost?.min ?? null });
+    if (poeira) throw new ErroPoeira(quantidade, `resto de ${quantidade} ${moedas(simbolo).base} ${poeira}`);
     const ordem = await ex.createOrder(simbolo, 'market', 'sell', qtd);
-    return this.resultado(ex, simbolo, ordem, precoRef);
+    return { ...(await this.resultado(ex, simbolo, ordem, precoRef)), poeira: Math.max(0, quantidade - qtd) };
   }
 
   async saldos(): Promise<Record<string, number>> {

@@ -85,6 +85,8 @@ async function valorDaCompra(e: EstrategiaPiloto): Promise<number | null> {
 const avaliados = new Map<string, number>();
 /** Última vela diária em que a saída por tendência foi conferida, por estratégia. */
 const tendenciaConferida = new Map<number, number>();
+/** Posição que vale menos que isto (na moeda de cotação) é resto de venda, não posição. */
+const VALOR_POEIRA = 1;
 /** Depois que a IA ou as regras barraram a compra num par, ele descansa este tempo. */
 const ESPERA_DEPOIS_DE_VETO_MS = 6 * 3_600_000;
 const MAX_PARES = 25;
@@ -269,6 +271,11 @@ async function cuidarDaPosicao(e: EstrategiaPiloto, agora: number): Promise<void
     `update posicoes set maior_preco = greatest(coalesce(maior_preco, $2), $2) where estrategia_id = $1 returning maior_preco`,
     [e.id, preco],
   );
+  // sobrou só poeira (ex.: 0,38 PEPE depois de uma venda): não é posição; zera para voltar a procurar
+  if (e.quantidade * preco < VALOR_POEIRA && !assistidoReal(e)) {
+    const r = await processarSinalDa(e.id, { acao: 'zerar', simbolo: e.simbolo, preco, id: `piloto-poeira-${agora}`, motivo: 'resto pequeno demais (poeira)' }, ORIGEM);
+    return situacao(e.id, `${e.simbolo}: sobrou só um resto pequeno demais da última venda → ${textoResultado(r)}`);
+  }
   const regras = { stopPct: e.auto_stop_pct, alvoPct: e.auto_alvo_pct, protecaoPct: e.auto_protecao_pct, recuoPct: e.auto_recuo_pct };
   const maior = p?.maior_preco ?? preco;
   const saida = conferirSaida(precoMedio, preco, maior, regras);

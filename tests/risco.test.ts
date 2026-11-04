@@ -229,3 +229,13 @@ describe('ordem manual do dono pelo painel', () => {
     expect(consultaIa('vender', p, true)).toBe(false);
   });
 });
+
+describe('poeira: resto pequeno demais para a exchange vender', () => {
+  it('motivoPoeira', async () => {
+    const { motivoPoeira } = await import('../src/brokers/tipos.js');
+    expect(motivoPoeira(0, 0.00002818, {})).toContain('passo');
+    expect(motivoPoeira(1_753_861, 0.00002818, { quantidade: 1, valor: 5 })).toBeNull();
+    expect(motivoPoeira(0.5, 100, { quantidade: 1 })).toContain('quantidade mínima');
+    expect(motivoPoeira(10, 0.1, { valor: 5 })).toContain('valor mínimo');
+  });
+});

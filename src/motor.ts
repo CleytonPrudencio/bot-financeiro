@@ -13,7 +13,7 @@ import { CorretoraAssistida } from './brokers/b3.js';
 import { agendarAviso, avisoEmAberto, criarAlerta } from './assistente/index.js';
 import { CorretoraMt5 } from './brokers/mt5.js';
 import { simularCompra, simularVenda } from './brokers/simulacao.js';
-import { moedas, type Corretora, type Execucao } from './brokers/tipos.js';
+import { ErroPoeira, moedas, type Corretora, type Execucao } from './brokers/tipos.js';
 
 const chave = derivarChave(config.chaveCifra);
 const EPS = 1e-12;
@@ -364,6 +364,18 @@ export async function processarSinalDa(estrategiaId: number, corpo: unknown, ip:
         exec = simularVenda(decisao.quantidade, preco, conta.taxa_simulada_pct);
       }
     } catch (e) {
+      if (e instanceof ErroPoeira) {
+        // o resto é pequeno demais para vender: fica na carteira e a posição do bot zera (senão a
+        // estratégia ficava presa "cuidando" dele e não comprava mais)
+        const motivo = `${e.message}: fica na carteira como poeira e a posição foi zerada`;
+        logger.warn({ estrategia: est.id, quantidade: e.quantidade }, 'posição zerada: resto abaixo do mínimo da exchange');
+        await c.query(
+          `update posicoes set quantidade = 0, custo_total = 0, maior_preco = null, stop_avisado = null, atualizada_em = now() where estrategia_id = $1`,
+          [est.id],
+        );
+        await gravarConsultas(await registrarSinal(c, est.id, sinal, corpo, ip, 'ignorado', motivo));
+        return { status: 200, situacao: 'ignorado', motivo };
+      }
       const erro = (e as Error).message.slice(0, 500);
       logger.error({ estrategia: est.id, modo: decisao.modo, erro }, 'exchange recusou a ordem');
       const sinalId = await registrarSinal(c, est.id, sinal, corpo, ip, 'erro', erro);
@@ -433,7 +445,8 @@ export async function atualizarPosicao(
     const fracao = antes.quantidade > 0 ? vendida / antes.quantidade : 1;
     quantidade = antes.quantidade - vendida;
     custo = antes.custo_total * (1 - fracao);
-    if (quantidade < EPS) {
+    // o que sobrou só por causa do passo da exchange (ex.: 0,38 PEPE) não é posição: zera
+    if (quantidade < EPS || quantidade <= (exec.poeira ?? 0) + EPS) {
       quantidade = 0;
       custo = 0;
     }
