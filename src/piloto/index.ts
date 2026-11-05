@@ -401,8 +401,8 @@ export const PADRAO = {
   valor: 50,
   intervalo_min_seg: 3600, // uma hora entre ordens (o stop e as saídas passam por cima)
   desvio_max_pct: 1.5,
-  // o stop e o alvo limitam a perda; o agente barra o que é claramente contra (migração 015)
-  ia_contexto: 'Capital pequeno: o stop de perda e o alvo já limitam cada operação. Aprove a compra quando nenhuma etapa importante (técnica ou risco) for claramente contra, mesmo que as outras fiquem neutras. Vete quando a técnica ou o risco forem contra, houver notícia grave ou queda descontrolada. Etapa que falhou não conta nem contra nem a favor.',
+  // exigente: precisa de uma etapa importante a favor e nenhuma contra (migração 022)
+  ia_contexto: 'Capital pequeno e a taxa come o ganho de operação ruim: aprove a compra só quando pelo menos uma etapa importante (técnica, risco ou previsão) for a favor e nenhuma delas for contra. Tudo neutro não basta: na dúvida, vete. Vete também com notícia grave ou queda descontrolada. Etapa que falhou não conta a favor.',
   stop: 3,
   alvo: 6,
   protecao: 2.5,
@@ -449,7 +449,7 @@ export async function criarPilotoPadrao(contaId: number, nome: string, simbolo: 
                               auto_ligado, auto_stop_pct, auto_alvo_pct, auto_protecao_pct, auto_recuo_pct,
                               auto_varrer, auto_tempo, auto_intervalo_min, auto_exigir_virada, auto_max_ia_dia, auto_estilo, auto_stop_atr)
      values ($1, $2, $3, true, false, $4, $5, $6, $6, null, $6, $7, $8,
-             'obrigatorio', 'agente', 'reprova', 0.6, false, $9,
+             'obrigatorio', 'agente', 'reprova', 0.7, false, $9,
              true, $10, $11, $12, $13, $16, $14, $15, false, $17, $18, $19) returning id`,
     [nome, contaId, simbolo, t.hash, t.prefixo, valor, PADRAO.intervalo_min_seg, PADRAO.desvio_max_pct,
       opcoes.contexto ?? PADRAO.ia_contexto, opcoes.stop ?? PADRAO.stop, opcoes.alvo ?? PADRAO.alvo, opcoes.protecao ?? PADRAO.protecao, opcoes.recuo ?? PADRAO.recuo,
@@ -475,7 +475,7 @@ export const POR_MOEDA_REPIQUE: OpcoesPiloto = {
   protecao: 0.8,
   recuo: 0.4,
   contexto:
-    'Estratégia de REPIQUE: compra a moeda que caiu demais (IFR abaixo de 30) quando a vela volta a fechar em alta, para um ganho curto (alvo e stop curtos; os desta compra vão na ordem). A tendência de baixa no dia é esperada nesta estratégia e não é motivo para vetar sozinha. Vete se houver notícia grave, queda descontrolada ou risco claro de continuar caindo forte.',
+    'Estratégia de REPIQUE: compra a moeda que caiu demais (IFR abaixo de 30) quando a vela volta a fechar em alta, para um ganho curto (alvo e stop curtos; os desta compra vão na ordem). A tendência de baixa no dia é esperada nesta estratégia e não é motivo para vetar sozinha. Vete se houver notícia grave, queda descontrolada ou risco claro de continuar caindo forte. Seja exigente: aprove só se o gatilho estiver confirmado nas velas da estratégia e pelo menos uma etapa importante (técnica, risco ou previsão) for a favor, sem nenhuma contra. Na dúvida, vete.',
 };
 
 export async function garantirEstrategiaPadrao(): Promise<number | null> {
