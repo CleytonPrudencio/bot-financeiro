@@ -195,9 +195,11 @@ export function propostaDoSinal(s, ativo) {
     const e = etapas[id];
     if (!e) continue;
     const r = e.resultado;
-    if (e.ok === false || !r) itens.push({ texto: `${nome}: falhou`, ok: false, peso: 1 });
+    // o motivo da falha (sem crédito, limite de uso, fora do ar...): só "falhou" não ajuda a resolver
+    if (e.ok === false || !r) itens.push({ texto: e.erro ? curto(`${nome}: falhou (${e.erro})`, 60) : `${nome}: falhou`, ok: false, peso: 1 });
     else itens.push({ texto: `${nome}: ${r.vies.replace('_', ' ')} (${r.nota}/100)`, ok: r.vies !== 'contra', peso: 1 });
   }
+  if (s.agente && !s.agente.decisao && s.agente.motivo) itens.push({ texto: curto(`Decisão: falhou (${s.agente.motivo})`, 60), ok: false, peso: 1 });
   if (!s.agente) {
     for (const p of s.pareceres ?? []) {
       itens.push({ texto: curto(`IA ${p.conector}: ${p.decisao ?? 'falhou'}`), ok: p.decisao === 'aprovar', peso: 1 });

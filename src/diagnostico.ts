@@ -3,7 +3,7 @@
 
 export type Grupo =
   | 'comprou' | 'posicao' | 'parada' | 'manual' | 'aguardando' | 'bolsa_fechada' | 'limite_ia' | 'sem_saldo'
-  | 'ia_vetou' | 'risco_barrou' | 'erro_ordem' | 'erro_piloto' | 'acao_cara' | 'sem_sinal' | 'aviso' | 'outro';
+  | 'ia_vetou' | 'ia_falhou' | 'risco_barrou' | 'erro_ordem' | 'erro_piloto' | 'acao_cara' | 'sem_sinal' | 'aviso' | 'outro';
 
 export const ROTULOS: Record<Grupo, string> = {
   comprou: 'Comprou na última passada',
@@ -15,6 +15,7 @@ export const ROTULOS: Record<Grupo, string> = {
   limite_ia: 'Chegou no limite diário de consultas à IA',
   sem_saldo: 'Sem saldo livre na conta para comprar',
   ia_vetou: 'Achou entrada, mas a IA vetou',
+  ia_falhou: 'Achou entrada, mas a IA não respondeu (sem crédito, limite de uso ou fora do ar)',
   risco_barrou: 'Achou entrada, mas uma regra de risco barrou',
   erro_ordem: 'Achou entrada, mas a ordem deu erro',
   erro_piloto: 'Erro no piloto (cotação ou velas)',
@@ -42,6 +43,8 @@ export function grupoDaSituacao(e: SituacaoEstrategia): Grupo {
   if (/saldo livre/i.test(t)) return 'sem_saldo';
   if (/aguardando a sua resposta/i.test(t)) return 'aviso';
   if (/→ executado/.test(t)) return 'comprou';
+  // "0 aprovaram, 0 vetaram, 1 falharam": ninguém votou, a IA nem respondeu
+  if (/→ (rejeitado|ignorado)/.test(t) && /0 aprovaram, 0 vetaram, \d+ falharam|nenhum conector de IA/i.test(t)) return 'ia_falhou';
   if (/→ (rejeitado|ignorado)/.test(t)) return /IA (barrou|obrigatória)|agente|vet/i.test(t) ? 'ia_vetou' : 'risco_barrou';
   if (/→ erro/.test(t)) return 'erro_ordem';
   if (/falhou nesta passada/i.test(t)) return 'erro_piloto';

@@ -19,6 +19,7 @@ describe('por que não está comprando', () => {
     expect(grupoDaSituacao(e('PETR4/BRL: repique → executado'))).toBe('comprou');
     expect(grupoDaSituacao(e('PETR4/BRL: repique → rejeitado: IA barrou: 0 aprovaram, 1 vetaram'))).toBe('ia_vetou');
     expect(grupoDaSituacao(e('PETR4/BRL: repique → rejeitado: limite diário: já comprou 90'))).toBe('risco_barrou');
+    expect(grupoDaSituacao(e('SOL/BRL: repique → rejeitado: IA barrou: 0 aprovaram, 0 vetaram, 1 falharam; precisava de 1'))).toBe('ia_falhou');
     expect(grupoDaSituacao(e('PETR4/BRL: repique → erro: MT5: mercado fechado'))).toBe('erro_ordem');
     expect(grupoDaSituacao(e('falhou nesta passada: a ponte MT5 ainda não mandou velas'))).toBe('erro_piloto');
     expect(grupoDaSituacao(e('olhou 1 par em velas de 1m: nenhum está para alta agora. IVVB11/BRL: entraria, mas 1 ação custa R$ 470.00'))).toBe('acao_cara');

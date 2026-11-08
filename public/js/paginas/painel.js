@@ -70,10 +70,11 @@ function cartaoParada(r, recarregar) {
 }
 
 // grupos que explicam a falta de compra (os outros são normais: desligada, com posição, comprou)
-const GRUPOS_ATENCAO = new Set(['sem_saldo', 'ia_vetou', 'limite_ia', 'risco_barrou', 'erro_ordem', 'erro_piloto', 'acao_cara', 'aviso']);
+const GRUPOS_ATENCAO = new Set(['sem_saldo', 'ia_vetou', 'ia_falhou', 'limite_ia', 'risco_barrou', 'erro_ordem', 'erro_piloto', 'acao_cara', 'aviso']);
 const DICAS = {
   sem_saldo: 'Confira o saldo na exchange ou na corretora. No MetaTrader que mostra o saldo, o "saldo livre" é o que conta (o SwingTrade da Genial mostra 0,00 e o bot manda a ordem mesmo assim).',
   ia_vetou: 'O agente achou a entrada arriscada. Em Agente ou na estratégia dá para ajustar o rigor (ou deixar a IA consultiva).',
+  ia_falhou: 'Abra a página IAs e clique em Testar em cada uma: o erro diz se é crédito acabando, limite de uso ou chave errada. Sem resposta da IA, a compra não sai (falha conta como não aprovou).',
   limite_ia: 'Cada estratégia consulta a IA poucas vezes por dia para não gastar crédito; aumente em "consultas à IA por dia".',
   risco_barrou: 'Um limite da estratégia (intervalo, limite diário, posição) segurou a ordem.',
   erro_ordem: 'A exchange ou a ponte recusou a ordem: veja o motivo em Sinais.',
